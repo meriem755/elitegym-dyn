@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "EliteGym"
+version = "1.0.0"
+id = "artifacts/elitegym"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 24754
+
+[services.development]
+run = "pnpm --filter @workspace/elitegym run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/elitegym", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/elitegym", "run", "serve" ]
+
+[services.env]
+PORT = "24754"
+BASE_PATH = "/"

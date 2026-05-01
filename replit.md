@@ -1,8 +1,8 @@
-# Workspace
+# Workspace — EliteGym
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+Application de gestion de salle de sport EliteGym — React Native (Expo) pour web + mobile, avec backend Express + MySQL.
 
 ## Stack
 
@@ -10,18 +10,38 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Node.js version**: 24
 - **Package manager**: pnpm
 - **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
+- **Frontend**: React Native (Expo), Expo Router, TanStack Query
+- **Backend**: Express 5, TypeScript, mysql2, bcrypt, jsonwebtoken
+- **Database**: MySQL (schéma dans `attached_assets/elitegym_1777650946184.sql`)
+- **Auth**: JWT (connexion par numéro de téléphone + mot de passe)
 - **Build**: esbuild (CJS bundle)
+
+## Artifacts
+
+- `artifacts/api-server` — Backend REST API (port 8080, chemin `/api`)
+- `artifacts/elitegym` — Application Expo (React Native web + mobile)
 
 ## Key Commands
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+- `pnpm --filter @workspace/api-server run dev` — démarrer le backend
+- `pnpm --filter @workspace/elitegym run dev` — démarrer le frontend Expo
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+## Variables d'environnement requises (backend)
+
+```env
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=...
+DB_NAME=elitegym
+JWT_SECRET=...
+PORT=8080
+```
+
+## Rôles utilisateurs
+
+- **membre** : accueil, planning, réservations, abonnements, IMC, messagerie, paramètres
+- **coach** : planning de ses cours, liste membres, planifier un cours, messages
+- **administrateur/gerant** : gestion membres/coachs, paiements, audit, planning
+
+## Voir README.md pour l'architecture complète et les instructions d'installation
