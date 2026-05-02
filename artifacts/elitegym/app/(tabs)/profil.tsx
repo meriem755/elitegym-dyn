@@ -43,30 +43,31 @@ function StarRow({ note, onSelect, size = 28 }: { note: number; onSelect?: (n: n
   );
 }
 
+const CHART_TOTAL = 88;   // hauteur totale px
+const CHART_LABEL = 14;   // hauteur label semaine
+const CHART_COUNT = 12;   // hauteur compteur
+const CHART_GAP   = 6;
+const BAR_AREA    = CHART_TOTAL - CHART_LABEL - CHART_COUNT - CHART_GAP * 2; // ≈ 50px
+
 function WeeklyChart({ data, color }: { data: { semaine: string; count: number }[]; color: string }) {
   const max = Math.max(...data.map((d) => d.count), 1);
   return (
-    <View style={chart.wrap}>
-      {data.map((d, i) => (
-        <View key={i} style={chart.col}>
-          <View style={chart.barWrap}>
-            <View style={[chart.bar, { height: `${Math.max(4, (d.count / max) * 100)}%`, backgroundColor: d.count > 0 ? color : color + "25" }]} />
+    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6, height: CHART_TOTAL }}>
+      {data.map((d, i) => {
+        const barH = Math.max(4, Math.round((d.count / max) * BAR_AREA));
+        return (
+          <View key={i} style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+            {d.count > 0 && (
+              <Text style={{ fontSize: 9, fontWeight: "900", color }}>{d.count}</Text>
+            )}
+            <View style={{ height: barH, width: "100%", borderRadius: 4, backgroundColor: d.count > 0 ? color : color + "25" }} />
+            <Text style={{ fontSize: 9, color: "#9ca3af", fontWeight: "600" }}>{d.semaine.slice(-3)}</Text>
           </View>
-          <Text style={chart.label}>{d.semaine.slice(-3)}</Text>
-          {d.count > 0 && <Text style={[chart.count, { color }]}>{d.count}</Text>}
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
-const chart = StyleSheet.create({
-  wrap: { flexDirection: "row", alignItems: "flex-end", gap: 6, height: 80 },
-  col: { flex: 1, alignItems: "center", gap: 4, height: "100%" },
-  barWrap: { flex: 1, width: "100%", justifyContent: "flex-end" },
-  bar: { width: "100%", borderRadius: 4, minHeight: 4 },
-  label: { fontSize: 9, color: "#9ca3af", fontWeight: "600" },
-  count: { fontSize: 9, fontWeight: "900", position: "absolute", top: -14 },
-});
 
 function groupByMonth(historique: any[]) {
   const groups: Record<string, any[]> = {};
@@ -586,7 +587,11 @@ export default function ProfilScreen() {
               placeholderTextColor={colors.mutedForeground}
               multiline
               numberOfLines={3}
-              style={[modal.textInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]}
+              style={[
+                modal.textInput,
+                { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border },
+                Platform.OS !== "web" && { textAlignVertical: "top" as const },
+              ]}
             />
 
             {/* Boutons */}
@@ -658,5 +663,5 @@ const modal = StyleSheet.create({
   starBtn: { padding: 4 },
   noteLabel: { textAlign: "center", fontSize: 13, fontWeight: "600", marginTop: -8 },
   fieldLabel: { fontSize: 13, fontWeight: "600" },
-  textInput: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 13, minHeight: 80, textAlignVertical: "top" },
+  textInput: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 13, minHeight: 80 },
 });
