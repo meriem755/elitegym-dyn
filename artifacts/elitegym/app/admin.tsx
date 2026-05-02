@@ -8,7 +8,7 @@ import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
 
-type Tab = "membres" | "coachs" | "planning" | "paiements" | "audit";
+type Tab = "membres" | "coachs" | "planning" | "paiements" | "audit" | "parametres";
 
 const STATUT_COLORS: Record<string, string> = {
   en_attente: "#f59e0b",
@@ -32,7 +32,14 @@ export default function AdminDashboard() {
   const [showMembre, setShowMembre] = useState(false);
   const [showCoach, setShowCoach] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ nom: "", prenom: "", telephone: "", specialite: "" });
+  const [form, setForm] = useState({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
+
+  // Paramètres
+  const [ancienMdp, setAncienMdp] = useState("");
+  const [nouveauMdp, setNouveauMdp] = useState("");
+  const [nouveauTel, setNouveauTel] = useState("");
+  const [nouvelEmail, setNouvelEmail] = useState("");
+  const [loadingParam, setLoadingParam] = useState(false);
 
   const load = async () => {
     try {
@@ -81,37 +88,76 @@ export default function AdminDashboard() {
   };
 
   const handleAjouterMembre = async () => {
-    if (!form.nom || !form.prenom || !form.telephone) { Alert.alert("Erreur", "Remplissez tous les champs"); return; }
+    if (!form.nom || !form.prenom || (!form.telephone && !form.email)) {
+      Alert.alert("Erreur", "Remplissez nom, prénom et au moins un contact (téléphone ou email)"); return;
+    }
     setLoading(true);
     try {
       await api.post("/admin/membres", form);
       Alert.alert("Succès", `Membre ajouté\nMot de passe par défaut : elitegym2026`);
       setShowMembre(false);
-      setForm({ nom: "", prenom: "", telephone: "", specialite: "" });
+      setForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
       load();
     } catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setLoading(false); }
   };
 
   const handleAjouterCoach = async () => {
-    if (!form.nom || !form.prenom || !form.telephone || !form.specialite) { Alert.alert("Erreur", "Remplissez tous les champs"); return; }
+    if (!form.nom || !form.prenom || (!form.telephone && !form.email) || !form.specialite) {
+      Alert.alert("Erreur", "Remplissez tous les champs (téléphone ou email requis)"); return;
+    }
     setLoading(true);
     try {
       await api.post("/admin/coachs", form);
       Alert.alert("Succès", `Coach ajouté\nMot de passe par défaut : elitegym2026`);
       setShowCoach(false);
-      setForm({ nom: "", prenom: "", telephone: "", specialite: "" });
+      setForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
       load();
     } catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setLoading(false); }
   };
 
+  const handleChangeMdp = async () => {
+    if (!ancienMdp || !nouveauMdp) { Alert.alert("Erreur", "Remplissez les deux champs"); return; }
+    if (nouveauMdp.length < 6) { Alert.alert("Erreur", "Mot de passe trop court (min 6 caractères)"); return; }
+    setLoadingParam(true);
+    try {
+      await api.post("/auth/change-password", { id_util: user?.id, ancien_mdp: ancienMdp, nouveau_mdp: nouveauMdp });
+      Alert.alert("Succès", "Mot de passe modifié ✓");
+      setAncienMdp(""); setNouveauMdp("");
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setLoadingParam(false); }
+  };
+
+  const handleChangeTel = async () => {
+    if (!nouveauTel) return;
+    setLoadingParam(true);
+    try {
+      await api.post("/auth/change-phone", { id_util: user?.id, telephone: nouveauTel });
+      Alert.alert("Succès", "Numéro modifié ✓");
+      setNouveauTel("");
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setLoadingParam(false); }
+  };
+
+  const handleChangeEmail = async () => {
+    if (!nouvelEmail) return;
+    setLoadingParam(true);
+    try {
+      await api.post("/auth/change-email", { id_util: user?.id, email: nouvelEmail });
+      Alert.alert("Succès", "Email modifié ✓");
+      setNouvelEmail("");
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setLoadingParam(false); }
+  };
+
   const TABS: { key: Tab; label: string; icon: string; badge?: number }[] = [
-    { key: "membres", label: "Membres", icon: "users" },
-    { key: "coachs", label: "Coachs", icon: "activity" },
-    { key: "planning", label: "Planning", icon: "check-square", badge: coursEnAttente.length },
-    { key: "paiements", label: "Paiements", icon: "credit-card" },
-    { key: "audit", label: "Audit", icon: "file-text" },
+    { key: "membres",    label: "Membres",    icon: "users" },
+    { key: "coachs",     label: "Coachs",     icon: "activity" },
+    { key: "planning",   label: "Planning",   icon: "check-square", badge: coursEnAttente.length },
+    { key: "paiements",  label: "Paiements",  icon: "credit-card" },
+    { key: "audit",      label: "Audit",      icon: "file-text" },
+    { key: "parametres", label: "Paramètres", icon: "settings" },
   ];
 
   return (
@@ -282,10 +328,56 @@ export default function AdminDashboard() {
             )}
           </View>
         ))}
+
+        {tab === "parametres" && (
+          <>
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.cardTitle, { color: colors.foreground }]}>Informations du compte</Text>
+              {[
+                { icon: "user",  label: "Nom complet", value: `${user?.prenom} ${user?.nom}` },
+                { icon: "shield",label: "Rôle",         value: user?.role },
+                { icon: "mail",  label: "Email",         value: user?.email || "—" },
+                { icon: "phone", label: "Téléphone",     value: user?.telephone || "—" },
+              ].map((item) => (
+                <View key={item.label} style={[styles.infoRow, { borderColor: colors.border }]}>
+                  <Feather name={item.icon as any} size={15} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>{item.label}</Text>
+                    <Text style={[styles.cardTitle, { color: colors.foreground, fontSize: 14 }]}>{item.value}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
+              <Text style={[styles.cardTitle, { color: colors.foreground }]}>Changer le mot de passe</Text>
+              <EliteInput label="Ancien mot de passe" secureTextEntry value={ancienMdp} onChangeText={setAncienMdp} placeholder="••••••••" />
+              <EliteInput label="Nouveau mot de passe" secureTextEntry value={nouveauMdp} onChangeText={setNouveauMdp} placeholder="Min. 6 caractères" />
+              <EliteButton title="Mettre à jour" onPress={handleChangeMdp} loading={loadingParam} variant="secondary" small />
+            </View>
+
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
+              <Text style={[styles.cardTitle, { color: colors.foreground }]}>Changer le numéro</Text>
+              <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>Actuel : {user?.telephone || "—"}</Text>
+              <EliteInput label="Nouveau numéro" value={nouveauTel} onChangeText={setNouveauTel} placeholder="+213..." keyboardType="phone-pad" />
+              <EliteButton title="Mettre à jour" onPress={handleChangeTel} loading={loadingParam} variant="secondary" small />
+            </View>
+
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
+              <Text style={[styles.cardTitle, { color: colors.foreground }]}>Changer l'email</Text>
+              <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>Actuel : {user?.email || "—"}</Text>
+              <EliteInput label="Nouvel email" value={nouvelEmail} onChangeText={setNouvelEmail} placeholder="admin@elitegym.dz" keyboardType="email-address" autoCapitalize="none" />
+              <EliteButton title="Mettre à jour" onPress={handleChangeEmail} loading={loadingParam} variant="secondary" small />
+            </View>
+
+            <EliteButton title="Se déconnecter" onPress={logout} variant="danger" />
+          </>
+        )}
       </ScrollView>
 
       <Modal visible={showMembre || showCoach} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
+          <ScrollView>
           <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.foreground }]}>
               {showMembre ? "Nouveau membre" : "Nouveau coach"}
@@ -298,7 +390,13 @@ export default function AdminDashboard() {
                 <EliteInput label="Prénom" value={form.prenom} onChangeText={(v) => setForm({ ...form, prenom: v })} />
               </View>
             </View>
-            <EliteInput label="Téléphone" value={form.telephone} onChangeText={(v) => setForm({ ...form, telephone: v })} keyboardType="phone-pad" />
+            <EliteInput label="Téléphone (optionnel)" value={form.telephone} onChangeText={(v) => setForm({ ...form, telephone: v })} keyboardType="phone-pad" placeholder="+213..." />
+            <EliteInput label="Email (optionnel)" value={form.email} onChangeText={(v) => setForm({ ...form, email: v })} keyboardType="email-address" autoCapitalize="none" placeholder="prenom.nom@elitegym.dz" />
+            <View style={[styles.infoBox, { backgroundColor: "#f59e0b10", borderColor: "#f59e0b40" }]}>
+              <Text style={[styles.infoBoxText, { color: "#b45309" }]}>
+                ⚠️ Au moins un contact requis : téléphone ou email.
+              </Text>
+            </View>
             {showCoach && (
               <EliteInput label="Spécialité" value={form.specialite} onChangeText={(v) => setForm({ ...form, specialite: v })} placeholder="ex: Musculation & Force" />
             )}
@@ -316,6 +414,7 @@ export default function AdminDashboard() {
               </View>
             </View>
           </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -354,4 +453,5 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: "800" },
   infoBox: { borderRadius: 8, padding: 10, borderWidth: 1 },
   infoBoxText: { fontSize: 12 },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, paddingVertical: 10 },
 });

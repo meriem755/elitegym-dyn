@@ -8,7 +8,7 @@ import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
 
-type Tab = "cours" | "avis" | "membres" | "progress" | "exercices";
+type Tab = "cours" | "avis" | "membres" | "progress" | "exercices" | "parametres";
 
 const STATUT_STYLE: Record<string, { color: string; label: string }> = {
   en_attente: { color: "#f59e0b", label: "En attente" },
@@ -39,6 +39,13 @@ export default function CoachDashboard() {
   const [programmes, setProgrammes] = useState<any[]>([]);
   const [avisData, setAvisData] = useState<{ avis: any[]; moyennes: any[] }>({ avis: [], moyennes: [] });
   const [loadingAvis, setLoadingAvis] = useState(false);
+
+  // Paramètres
+  const [ancienMdp, setAncienMdp] = useState("");
+  const [nouveauMdp, setNouveauMdp] = useState("");
+  const [nouveauTel, setNouveauTel] = useState("");
+  const [nouvelEmail, setNouvelEmail] = useState("");
+  const [loadingParam, setLoadingParam] = useState(false);
 
   const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -145,12 +152,47 @@ export default function CoachDashboard() {
     finally { setLoading(false); }
   };
 
+  const handleChangeMdp = async () => {
+    if (!ancienMdp || !nouveauMdp) { Alert.alert("Erreur", "Remplissez les deux champs"); return; }
+    if (nouveauMdp.length < 6) { Alert.alert("Erreur", "Mot de passe trop court (min 6 caractères)"); return; }
+    setLoadingParam(true);
+    try {
+      await api.post("/auth/change-password", { id_util: user?.id, ancien_mdp: ancienMdp, nouveau_mdp: nouveauMdp });
+      Alert.alert("Succès", "Mot de passe modifié ✓");
+      setAncienMdp(""); setNouveauMdp("");
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setLoadingParam(false); }
+  };
+
+  const handleChangeTel = async () => {
+    if (!nouveauTel) return;
+    setLoadingParam(true);
+    try {
+      await api.post("/auth/change-phone", { id_util: user?.id, telephone: nouveauTel });
+      Alert.alert("Succès", "Numéro modifié ✓");
+      setNouveauTel("");
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setLoadingParam(false); }
+  };
+
+  const handleChangeEmail = async () => {
+    if (!nouvelEmail) return;
+    setLoadingParam(true);
+    try {
+      await api.post("/auth/change-email", { id_util: user?.id, email: nouvelEmail });
+      Alert.alert("Succès", "Email modifié ✓");
+      setNouvelEmail("");
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setLoadingParam(false); }
+  };
+
   const TABS: { key: Tab; label: string; icon: string }[] = [
-    { key: "cours",     label: "Planning",   icon: "calendar" },
-    { key: "avis",      label: "Avis",        icon: "star" },
-    { key: "membres",   label: "Membres",     icon: "users" },
-    { key: "progress",  label: "Suivi",       icon: "trending-up" },
-    { key: "exercices", label: "Programmes",  icon: "clipboard" },
+    { key: "cours",      label: "Planning",   icon: "calendar" },
+    { key: "avis",       label: "Avis",        icon: "star" },
+    { key: "membres",    label: "Membres",     icon: "users" },
+    { key: "progress",   label: "Suivi",       icon: "trending-up" },
+    { key: "exercices",  label: "Programmes",  icon: "clipboard" },
+    { key: "parametres", label: "Paramètres",  icon: "settings" },
   ];
 
   // Avis groupés par cours pour l'onglet Avis
@@ -378,6 +420,52 @@ export default function CoachDashboard() {
           </>
         )}
 
+        {/* ── PARAMÈTRES ── */}
+        {tab === "parametres" && (
+          <>
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Informations du compte</Text>
+              {[
+                { icon: "user",  label: "Nom complet", value: `${user?.prenom} ${user?.nom}` },
+                { icon: "shield",label: "Rôle",         value: user?.role },
+                { icon: "mail",  label: "Email",         value: user?.email || "—" },
+                { icon: "phone", label: "Téléphone",     value: user?.telephone || "—" },
+              ].map((item) => (
+                <View key={item.label} style={styles.infoRow}>
+                  <Feather name={item.icon as any} size={15} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.coursInfo, { color: colors.mutedForeground }]}>{item.label}</Text>
+                    <Text style={[styles.coursNom, { color: colors.foreground, fontSize: 14 }]}>{item.value}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Changer le mot de passe</Text>
+              <EliteInput label="Ancien mot de passe" secureTextEntry value={ancienMdp} onChangeText={setAncienMdp} placeholder="••••••••" />
+              <EliteInput label="Nouveau mot de passe" secureTextEntry value={nouveauMdp} onChangeText={setNouveauMdp} placeholder="Min. 6 caractères" />
+              <EliteButton title="Mettre à jour" onPress={handleChangeMdp} loading={loadingParam} variant="secondary" small />
+            </View>
+
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Changer le numéro</Text>
+              <Text style={[styles.coursInfo, { color: colors.mutedForeground }]}>Actuel : {user?.telephone || "—"}</Text>
+              <EliteInput label="Nouveau numéro" value={nouveauTel} onChangeText={setNouveauTel} placeholder="+213..." keyboardType="phone-pad" />
+              <EliteButton title="Mettre à jour" onPress={handleChangeTel} loading={loadingParam} variant="secondary" small />
+            </View>
+
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Changer l'email</Text>
+              <Text style={[styles.coursInfo, { color: colors.mutedForeground }]}>Actuel : {user?.email || "—"}</Text>
+              <EliteInput label="Nouvel email" value={nouvelEmail} onChangeText={setNouvelEmail} placeholder="coach@elitegym.dz" keyboardType="email-address" autoCapitalize="none" />
+              <EliteButton title="Mettre à jour" onPress={handleChangeEmail} loading={loadingParam} variant="secondary" small />
+            </View>
+
+            <EliteButton title="Se déconnecter" onPress={logout} variant="danger" />
+          </>
+        )}
+
         {/* ── PROGRAMMES ── */}
         {tab === "exercices" && (
           <>
@@ -506,6 +594,8 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, fontWeight: "600" },
   divider: { height: 1, marginVertical: 4 },
   avisCard: { borderRadius: 8, padding: 10, borderWidth: 1, gap: 4 },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: "transparent", paddingVertical: 8 },
+  sectionTitle: { fontSize: 14, fontWeight: "700" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalContent: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12, maxHeight: "90%" },
   modalTitle: { fontSize: 18, fontWeight: "800" },
