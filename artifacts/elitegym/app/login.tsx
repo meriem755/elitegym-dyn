@@ -25,18 +25,8 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
+      // id_membre et id_coach sont maintenant retournés directement par le serveur
       const data = await api.post("/auth/login", { telephone, mot_de_passe: mdp });
-
-      if (data.role === "membre") {
-        const membres = await api.get("/admin/membres");
-        const membre = membres.find((m: any) => m.telephone === telephone);
-        if (membre) data.id_membre = membre.id_membre;
-      } else if (data.role === "coach") {
-        const coachs = await api.get("/coachs");
-        const coach = coachs.find((c: any) => c.telephone === telephone);
-        if (coach) data.id_coach = coach.id_coach;
-      }
-
       await login(data);
 
       if (data.role === "administrateur" || data.role === "gerant") {
@@ -47,7 +37,7 @@ export default function LoginScreen() {
         router.replace("/(tabs)");
       }
     } catch (e: any) {
-      Alert.alert("Erreur", e.message || "Identifiants incorrects");
+      Alert.alert("Connexion impossible", e.message || "Identifiants incorrects");
     } finally {
       setLoading(false);
     }
@@ -103,7 +93,8 @@ export default function LoginScreen() {
 
         <View style={[styles.note, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "40" }]}>
           <Text style={[styles.noteText, { color: colors.primary }]}>
-            ℹ️ L'inscription se fait exclusivement en présentiel à la salle.
+            ℹ️ Mot de passe par défaut (nouveaux comptes) : elitegym2026{"\n"}
+            L'inscription se fait en présentiel à la salle.
           </Text>
         </View>
       </View>
@@ -116,28 +107,12 @@ const styles = StyleSheet.create({
   backBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" },
   backText: { fontSize: 14 },
   logoSection: { alignItems: "center", gap: 8 },
-  logo: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  logo: { width: 72, height: 72, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   logoText: { color: "#fff", fontSize: 26, fontWeight: "900" },
   appName: { fontSize: 28, fontWeight: "900" },
   tagline: { fontSize: 14 },
-  card: {
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-    borderWidth: 1,
-  },
+  card: { borderRadius: 16, padding: 20, gap: 16, borderWidth: 1 },
   title: { fontSize: 20, fontWeight: "800", marginBottom: 4 },
-  note: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 4,
-  },
+  note: { borderWidth: 1, borderRadius: 10, padding: 12, marginTop: 4 },
   noteText: { fontSize: 13, lineHeight: 18 },
 });

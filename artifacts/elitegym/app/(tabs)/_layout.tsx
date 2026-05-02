@@ -56,21 +56,13 @@ function NativeTabLayout() {
         <Icon sf={{ default: "calendar", selected: "calendar.fill" }} />
         <Label>Planning</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="calculateur">
+        <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
+        <Label>Calculateur</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="abonnements">
         <Icon sf={{ default: "creditcard", selected: "creditcard.fill" }} />
-        <Label>Abonnements</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="coachs">
-        <Icon sf={{ default: "person.3", selected: "person.3.fill" }} />
-        <Label>Équipe</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="boutique">
-        <Icon sf={{ default: "bag", selected: "bag.fill" }} />
-        <Label>Boutique</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="contact">
-        <Icon sf={{ default: "phone", selected: "phone.fill" }} />
-        <Label>Contact</Label>
+        <Label>Abonnement</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="messages">
         <Icon sf={{ default: "message", selected: "message.fill" }} />
@@ -137,39 +129,21 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="calculateur"
+        options={{
+          title: "Calculateur",
+          tabBarIcon: ({ color }) => isIOS
+            ? <SymbolView name="chart.bar" tintColor={color} size={22} />
+            : <Feather name="activity" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="abonnements"
         options={{
-          title: "Abonnements",
+          title: "Abonnement",
           tabBarIcon: ({ color }) => isIOS
             ? <SymbolView name="creditcard" tintColor={color} size={22} />
             : <Feather name="credit-card" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="coachs"
-        options={{
-          title: "Équipe",
-          tabBarIcon: ({ color }) => isIOS
-            ? <SymbolView name="person.3" tintColor={color} size={22} />
-            : <Feather name="users" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="boutique"
-        options={{
-          title: "Boutique",
-          tabBarIcon: ({ color }) => isIOS
-            ? <SymbolView name="bag" tintColor={color} size={22} />
-            : <Feather name="shopping-bag" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="contact"
-        options={{
-          title: "Contact",
-          tabBarIcon: ({ color }) => isIOS
-            ? <SymbolView name="phone" tintColor={color} size={22} />
-            : <Feather name="phone" size={22} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -192,6 +166,10 @@ function ClassicTabLayout() {
             : <Feather name="user" size={22} color={color} />,
         }}
       />
+      {/* Tabs cachés — routes accessibles mais pas dans la barre */}
+      <Tabs.Screen name="coachs" options={{ href: null }} />
+      <Tabs.Screen name="boutique" options={{ href: null }} />
+      <Tabs.Screen name="contact" options={{ href: null }} />
     </Tabs>
   );
 }

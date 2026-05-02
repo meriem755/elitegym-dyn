@@ -8,6 +8,9 @@ import coachsRouter from "./coachs.js";
 import messagesRouter from "./messages.js";
 import adminRouter from "./admin.js";
 import statsRouter from "./stats.js";
+import progressRouter from "./progress.js";
+import exercicesRouter from "./exercices.js";
+import chatRouter from "./chat.js";
 
 const router: IRouter = Router();
 
@@ -20,5 +23,8 @@ router.use("/coachs", coachsRouter);
 router.use("/messages", messagesRouter);
 router.use("/admin", adminRouter);
 router.use("/stats", statsRouter);
+router.use("/progress", progressRouter);
+router.use("/exercices", exercicesRouter);
+router.use("/chat", chatRouter);
 
 export default router;

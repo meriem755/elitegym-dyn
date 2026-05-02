@@ -8,7 +8,14 @@ import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
 
-type Tab = "membres" | "coachs" | "paiements" | "audit";
+type Tab = "membres" | "coachs" | "planning" | "paiements" | "audit";
+
+const STATUT_COLORS: Record<string, string> = {
+  en_attente: "#f59e0b",
+  publie: "#10b981",
+  annule: "#ef4444",
+  termine: "#6b7280",
+};
 
 export default function AdminDashboard() {
   const colors = useColors();
@@ -17,8 +24,10 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>("membres");
   const [membres, setMembres] = useState<any[]>([]);
   const [coachs, setCoachs] = useState<any[]>([]);
+  const [coursEnAttente, setCoursEnAttente] = useState<any[]>([]);
   const [paiements, setPaiements] = useState<any[]>([]);
   const [audit, setAudit] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>({});
   const [refreshing, setRefreshing] = useState(false);
   const [showMembre, setShowMembre] = useState(false);
   const [showCoach, setShowCoach] = useState(false);
@@ -27,28 +36,56 @@ export default function AdminDashboard() {
 
   const load = async () => {
     try {
-      const [m, c, p, a] = await Promise.all([
+      const [m, c, p, a, st, cours] = await Promise.all([
         api.get("/admin/membres"),
         api.get("/admin/coachs"),
         api.get("/admin/paiements"),
         api.get("/admin/audit"),
+        api.get("/admin/stats").catch(() => ({})),
+        api.get("/admin/cours-en-attente"),
       ]);
       setMembres(m);
       setCoachs(c);
       setPaiements(p);
       setAudit(a);
+      setStats(st);
+      setCoursEnAttente(cours);
     } catch {}
   };
 
   useEffect(() => { load(); }, []);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
+  const handleApprouver = async (id_cours: number) => {
+    try {
+      await api.put(`/admin/cours/${id_cours}/approuver`);
+      Alert.alert("Approuvé ✓", "Le cours est maintenant publié");
+      load();
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+  };
+
+  const handleRejeter = async (id_cours: number) => {
+    Alert.alert("Confirmer", "Rejeter ce cours ?", [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Rejeter", style: "destructive",
+        onPress: async () => {
+          try {
+            await api.put(`/admin/cours/${id_cours}/rejeter`);
+            Alert.alert("Rejeté", "Le cours a été annulé");
+            load();
+          } catch (e: any) { Alert.alert("Erreur", e.message); }
+        },
+      },
+    ]);
+  };
+
   const handleAjouterMembre = async () => {
     if (!form.nom || !form.prenom || !form.telephone) { Alert.alert("Erreur", "Remplissez tous les champs"); return; }
     setLoading(true);
     try {
       await api.post("/admin/membres", form);
-      Alert.alert("Succès", "Membre ajouté");
+      Alert.alert("Succès", `Membre ajouté\nMot de passe par défaut : elitegym2026`);
       setShowMembre(false);
       setForm({ nom: "", prenom: "", telephone: "", specialite: "" });
       load();
@@ -61,7 +98,7 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       await api.post("/admin/coachs", form);
-      Alert.alert("Succès", "Coach ajouté");
+      Alert.alert("Succès", `Coach ajouté\nMot de passe par défaut : elitegym2026`);
       setShowCoach(false);
       setForm({ nom: "", prenom: "", telephone: "", specialite: "" });
       load();
@@ -69,14 +106,13 @@ export default function AdminDashboard() {
     finally { setLoading(false); }
   };
 
-  const TABS: { key: Tab; label: string; icon: string }[] = [
+  const TABS: { key: Tab; label: string; icon: string; badge?: number }[] = [
     { key: "membres", label: "Membres", icon: "users" },
     { key: "coachs", label: "Coachs", icon: "activity" },
+    { key: "planning", label: "Planning", icon: "check-square", badge: coursEnAttente.length },
     { key: "paiements", label: "Paiements", icon: "credit-card" },
     { key: "audit", label: "Audit", icon: "file-text" },
   ];
-
-  const counts = { membres: membres.length, coachs: coachs.length, paiements: paiements.length };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -92,9 +128,9 @@ export default function AdminDashboard() {
 
       <View style={styles.statsRow}>
         {[
-          { label: "Membres", value: counts.membres, color: colors.primary },
-          { label: "Coachs", value: counts.coachs, color: "#10b981" },
-          { label: "Paiements", value: counts.paiements, color: "#f59e0b" },
+          { label: "Membres", value: membres.length, color: colors.primary },
+          { label: "Coachs", value: coachs.length, color: "#10b981" },
+          { label: "En attente", value: coursEnAttente.length, color: "#f59e0b" },
         ].map((s) => (
           <View key={s.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.statNum, { color: s.color }]}>{s.value}</Text>
@@ -110,7 +146,14 @@ export default function AdminDashboard() {
             onPress={() => setTab(t.key)}
             style={[styles.tabBtn, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
           >
-            <Feather name={t.icon as any} size={14} color={tab === t.key ? colors.primary : colors.mutedForeground} />
+            <View style={{ position: "relative" }}>
+              <Feather name={t.icon as any} size={14} color={tab === t.key ? colors.primary : colors.mutedForeground} />
+              {t.badge && t.badge > 0 ? (
+                <View style={styles.badgeDot}>
+                  <Text style={styles.badgeText}>{t.badge}</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={[styles.tabLabel, { color: tab === t.key ? colors.primary : colors.mutedForeground }]}>{t.label}</Text>
           </TouchableOpacity>
         ))}
@@ -122,12 +165,19 @@ export default function AdminDashboard() {
       >
         {tab === "membres" && (
           <>
-            <EliteButton title="Ajouter un membre" onPress={() => setShowMembre(true)} variant="primary" small />
+            <EliteButton title="+ Ajouter un membre" onPress={() => setShowMembre(true)} variant="primary" small />
             {membres.map((m: any) => (
               <View key={m.id_membre} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[styles.cardTitle, { color: colors.foreground }]}>{m.prenom} {m.nom}</Text>
-                <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>{m.telephone}</Text>
-                <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>Inscrit le {m.date_inscription?.slice(0, 10)}</Text>
+                <View style={styles.cardRow}>
+                  <View style={[styles.cardAvatar, { backgroundColor: colors.primary + "20" }]}>
+                    <Text style={[styles.cardAvatarText, { color: colors.primary }]}>{m.prenom?.[0]}{m.nom?.[0]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.cardTitle, { color: colors.foreground }]}>{m.prenom} {m.nom}</Text>
+                    <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>{m.telephone || m.email}</Text>
+                    <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>Membre #{m.id_membre} • Inscrit le {m.date_inscription?.slice(0, 10)}</Text>
+                  </View>
+                </View>
               </View>
             ))}
           </>
@@ -135,20 +185,78 @@ export default function AdminDashboard() {
 
         {tab === "coachs" && (
           <>
-            <EliteButton title="Ajouter un coach" onPress={() => setShowCoach(true)} variant="primary" small />
+            <EliteButton title="+ Ajouter un coach" onPress={() => setShowCoach(true)} variant="primary" small />
             {coachs.map((c: any) => (
               <View key={c.id_coach} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[styles.cardTitle, { color: colors.foreground }]}>{c.prenom} {c.nom}</Text>
-                <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>{c.specialite}</Text>
-                <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>{c.telephone}</Text>
+                <View style={styles.cardRow}>
+                  <View style={[styles.cardAvatar, { backgroundColor: "#10b981" + "20" }]}>
+                    <Text style={[styles.cardAvatarText, { color: "#10b981" }]}>{c.prenom?.[0]}{c.nom?.[0]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.cardTitle, { color: colors.foreground }]}>{c.prenom} {c.nom}</Text>
+                    <Text style={[styles.cardSub, { color: colors.primary }]}>{c.specialite}</Text>
+                    <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>Coach #{c.id_coach} • {c.telephone}</Text>
+                  </View>
+                </View>
               </View>
             ))}
           </>
         )}
 
+        {tab === "planning" && (
+          <>
+            {coursEnAttente.length === 0 ? (
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: "center", paddingVertical: 30 }]}>
+                <Feather name="check-circle" size={32} color="#10b981" />
+                <Text style={[styles.cardSub, { color: colors.mutedForeground, marginTop: 8, textAlign: "center" }]}>
+                  Aucun cours en attente d'approbation
+                </Text>
+              </View>
+            ) : (
+              coursEnAttente.map((c: any) => (
+                <View key={c.id_cours} style={[styles.card, { backgroundColor: colors.card, borderColor: "#f59e0b40", borderWidth: 1.5 }]}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.cardTitle, { color: colors.foreground }]}>{c.type_cours}</Text>
+                      <Text style={[styles.cardSub, { color: colors.primary, fontWeight: "600" }]}>
+                        Coach : {c.prenom} {c.nom}
+                      </Text>
+                      <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>
+                        📅 {c.date_cours?.slice(0, 10)} à {c.heure_debut?.slice(0, 5)} • {c.duree_minutes} min
+                      </Text>
+                      <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>
+                        🏠 {c.salle} • {c.capacite_max} places
+                      </Text>
+                    </View>
+                    <View style={[styles.statusBadge, { backgroundColor: "#f59e0b20" }]}>
+                      <Text style={[styles.statusText, { color: "#f59e0b" }]}>En attente</Text>
+                    </View>
+                  </View>
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity
+                      onPress={() => handleRejeter(c.id_cours)}
+                      style={[styles.actionBtn, { backgroundColor: "#ef444420", borderColor: "#ef4444" }]}
+                    >
+                      <Feather name="x" size={14} color="#ef4444" />
+                      <Text style={[styles.actionText, { color: "#ef4444" }]}>Rejeter</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleApprouver(c.id_cours)}
+                      style={[styles.actionBtn, { backgroundColor: "#10b98120", borderColor: "#10b981", flex: 2 }]}
+                    >
+                      <Feather name="check" size={14} color="#10b981" />
+                      <Text style={[styles.actionText, { color: "#10b981" }]}>Approuver & Publier</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </>
+        )}
+
         {tab === "paiements" && paiements.map((p: any) => (
           <View key={p.id_paiement} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.row}>
+            <View style={styles.cardRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: colors.foreground }]}>{p.prenom} {p.nom}</Text>
                 <Text style={[styles.cardSub, { color: colors.mutedForeground }]}>{p.motif}</Text>
@@ -194,6 +302,11 @@ export default function AdminDashboard() {
             {showCoach && (
               <EliteInput label="Spécialité" value={form.specialite} onChangeText={(v) => setForm({ ...form, specialite: v })} placeholder="ex: Musculation & Force" />
             )}
+            <View style={[styles.infoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
+              <Text style={[styles.infoBoxText, { color: colors.primary }]}>
+                Mot de passe par défaut : <Text style={{ fontWeight: "900" }}>elitegym2026</Text>
+              </Text>
+            </View>
             <View style={styles.row}>
               <View style={{ flex: 1 }}>
                 <EliteButton title="Annuler" onPress={() => { setShowMembre(false); setShowCoach(false); }} variant="outline" />
@@ -210,13 +323,7 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", paddingHorizontal: 16, paddingBottom: 16 },
   headerTitle: { color: "#fff", fontSize: 20, fontWeight: "800" },
   headerSub: { color: "rgba(255,255,255,0.8)", fontSize: 13 },
   statsRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
@@ -224,21 +331,27 @@ const styles = StyleSheet.create({
   statNum: { fontSize: 22, fontWeight: "800" },
   statLabel: { fontSize: 11 },
   tabBar: { borderBottomWidth: 1 },
-  tabBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
+  tabBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 12 },
   tabLabel: { fontSize: 12, fontWeight: "600" },
+  badgeDot: { position: "absolute", top: -5, right: -8, backgroundColor: "#E63946", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
+  badgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
   content: { padding: 16, gap: 10 },
-  card: { borderRadius: 12, padding: 14, gap: 4, borderWidth: 1 },
+  card: { borderRadius: 12, padding: 14, gap: 8, borderWidth: 1 },
+  cardRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  cardAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  cardAvatarText: { fontSize: 14, fontWeight: "800" },
   cardTitle: { fontSize: 15, fontWeight: "700" },
-  cardSub: { fontSize: 13 },
+  cardSub: { fontSize: 12, lineHeight: 18 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  statusText: { fontSize: 11, fontWeight: "700" },
+  actionRow: { flexDirection: "row", gap: 8, marginTop: 4 },
+  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 8, paddingVertical: 8, borderWidth: 1 },
+  actionText: { fontSize: 13, fontWeight: "700" },
   row: { flexDirection: "row", gap: 10, alignItems: "center" },
   montant: { fontSize: 16, fontWeight: "800" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalContent: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12 },
   modalTitle: { fontSize: 18, fontWeight: "800" },
+  infoBox: { borderRadius: 8, padding: 10, borderWidth: 1 },
+  infoBoxText: { fontSize: 12 },
 });

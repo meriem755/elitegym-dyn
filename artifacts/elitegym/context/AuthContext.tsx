@@ -7,6 +7,8 @@ interface User {
   prenom: string;
   role: "administrateur" | "coach" | "membre" | "gerant" | "receptionniste";
   token: string;
+  email?: string;
+  telephone?: string;
   id_membre?: number;
   id_coach?: number;
 }
@@ -15,6 +17,7 @@ interface AuthContextType {
   user: User | null;
   login: (data: any) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (patch: Partial<User>) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -38,11 +41,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       prenom: data.prenom,
       role: data.role,
       token: data.token,
+      email: data.email,
+      telephone: data.telephone,
       id_membre: data.id_membre,
       id_coach: data.id_coach,
     };
     await AsyncStorage.setItem("elitegym_user", JSON.stringify(userData));
     setUser(userData);
+  };
+
+  const updateUser = async (patch: Partial<User>) => {
+    const updated = { ...user, ...patch } as User;
+    await AsyncStorage.setItem("elitegym_user", JSON.stringify(updated));
+    setUser(updated);
   };
 
   const logout = async () => {
@@ -51,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, login, logout, updateUser, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

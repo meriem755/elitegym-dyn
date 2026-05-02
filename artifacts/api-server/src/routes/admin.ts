@@ -8,31 +8,23 @@ const router = Router();
 router.get("/membres", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
-      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email, u.date_creation, m.id_membre, m.date_inscription
-      FROM membre m
-      JOIN utilisateur u ON m.id_util = u.id_util
-      WHERE u.statut = 1
+      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email, u.date_creation,
+             m.id_membre, m.date_inscription
+      FROM membre m JOIN utilisateur u ON m.id_util = u.id_util WHERE u.statut = 1
     `);
     res.json(rows);
-  } catch (err: any) {
-    req.log.error(err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 router.get("/coachs", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
-      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email, c.id_coach, c.specialite, c.date_embauche
-      FROM coach c
-      JOIN utilisateur u ON c.id_util = u.id_util
-      WHERE u.statut = 1
+      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email,
+             c.id_coach, c.specialite, c.date_embauche
+      FROM coach c JOIN utilisateur u ON c.id_util = u.id_util WHERE u.statut = 1
     `);
     res.json(rows);
-  } catch (err: any) {
-    req.log.error(err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 router.get("/paiements", authMiddleware, async (req, res) => {
@@ -44,66 +36,91 @@ router.get("/paiements", authMiddleware, async (req, res) => {
       JOIN utilisateur u ON m.id_util = u.id_util
       LEFT JOIN abonnement a ON p.id_abonnement = a.id_abonnement
       LEFT JOIN formule_abonnement f ON a.id_formule = f.id_formule
-      ORDER BY p.date_heure DESC
-      LIMIT 100
+      ORDER BY p.date_heure DESC LIMIT 100
     `);
     res.json(rows);
-  } catch (err: any) {
-    req.log.error(err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 router.get("/audit", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
-      SELECT j.*, u.nom, u.prenom
-      FROM journal_audit j
+      SELECT j.*, u.nom, u.prenom FROM journal_audit j
       JOIN utilisateur u ON j.id_util = u.id_util
-      ORDER BY j.date_action DESC
-      LIMIT 100
+      ORDER BY j.date_action DESC LIMIT 100
     `);
     res.json(rows);
-  } catch (err: any) {
-    req.log.error(err);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
+// Cours en attente d'approbation
+router.get("/cours-en-attente", authMiddleware, async (req, res) => {
+  try {
+    const [rows]: any = await pool.query(`
+      SELECT c.*, u.nom, u.prenom, co.specialite
+      FROM cours c
+      JOIN coach co ON c.id_coach = co.id_coach
+      JOIN utilisateur u ON co.id_util = u.id_util
+      WHERE c.statut = 'en_attente'
+      ORDER BY c.date_cours, c.heure_debut
+    `);
+    res.json(rows);
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+// Approuver un cours
+router.put("/cours/:id/approuver", authMiddleware, async (req, res) => {
+  try {
+    await pool.query("UPDATE cours SET statut = 'publie' WHERE id_cours = ?", [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+// Rejeter un cours
+router.put("/cours/:id/rejeter", authMiddleware, async (req, res) => {
+  try {
+    await pool.query("UPDATE cours SET statut = 'annule' WHERE id_cours = ?", [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+// Créer membre
 router.post("/membres", authMiddleware, async (req, res) => {
   const { nom, prenom, telephone, email, mot_de_passe } = req.body;
   try {
     const hash = await bcrypt.hash(mot_de_passe || "elitegym2026", 12);
     const [result]: any = await pool.query(`
-      INSERT INTO utilisateur (nom, prenom, email, mot_de_passe, telephone, role) VALUES (?, ?, ?, ?, ?, 'membre')
+      INSERT INTO utilisateur (nom, prenom, email, mot_de_passe, telephone, role)
+      VALUES (?, ?, ?, ?, ?, 'membre')
     `, [nom, prenom, email || `${telephone}@elitegym.dz`, hash, telephone]);
-    await pool.query(
-      "INSERT INTO membre (id_util, date_inscription) VALUES (?, CURDATE())",
-      [result.insertId]
-    );
+    await pool.query("INSERT INTO membre (id_util, date_inscription) VALUES (?, CURDATE())", [result.insertId]);
     res.json({ success: true, id_util: result.insertId });
-  } catch (err: any) {
-    req.log.error(err);
-    res.status(500).json({ error: "Erreur serveur (téléphone ou email déjà utilisé)" });
-  }
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Téléphone ou email déjà utilisé" }); }
 });
 
+// Créer coach
 router.post("/coachs", authMiddleware, async (req, res) => {
   const { nom, prenom, telephone, email, specialite, mot_de_passe } = req.body;
   try {
     const hash = await bcrypt.hash(mot_de_passe || "elitegym2026", 12);
     const [result]: any = await pool.query(`
-      INSERT INTO utilisateur (nom, prenom, email, mot_de_passe, telephone, role) VALUES (?, ?, ?, ?, ?, 'coach')
+      INSERT INTO utilisateur (nom, prenom, email, mot_de_passe, telephone, role)
+      VALUES (?, ?, ?, ?, ?, 'coach')
     `, [nom, prenom, email || `${telephone}@elitegym.dz`, hash, telephone]);
-    await pool.query(
-      "INSERT INTO coach (id_util, specialite, date_embauche) VALUES (?, ?, CURDATE())",
-      [result.insertId, specialite]
-    );
+    await pool.query("INSERT INTO coach (id_util, specialite, date_embauche) VALUES (?, ?, CURDATE())", [result.insertId, specialite]);
     res.json({ success: true, id_util: result.insertId });
-  } catch (err: any) {
-    req.log.error(err);
-    res.status(500).json({ error: "Erreur serveur (téléphone ou email déjà utilisé)" });
-  }
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Téléphone ou email déjà utilisé" }); }
+});
+
+// Stats dashboard admin
+router.get("/stats", authMiddleware, async (req, res) => {
+  try {
+    const [[m]]: any = await pool.query("SELECT COUNT(*) as n FROM membre");
+    const [[c]]: any = await pool.query("SELECT COUNT(*) as n FROM coach");
+    const [[r]]: any = await pool.query("SELECT COUNT(*) as n FROM reservation WHERE statut='confirmee'");
+    const [[a]]: any = await pool.query("SELECT COUNT(*) as n FROM cours WHERE statut='en_attente'");
+    res.json({ membres: m.n, coachs: c.n, reservations: r.n, en_attente: a.n });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 export default router;
