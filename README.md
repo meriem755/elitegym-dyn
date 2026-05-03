@@ -1,6 +1,6 @@
 # EliteGym — Application de Gestion de Salle de Sport
 
-Application mobile complète pour la salle **EliteGym** de Béjaïa, Algérie.
+Application mobile complète pour la salle **EliteGym** de Béjaïa, Algérie.  
 Stack : **Expo / React Native** · **Node.js / Express** · **MySQL via WAMP Server**.
 
 ---
@@ -21,17 +21,41 @@ EXPO_PUBLIC_API_URL=http://192.168.1.42:8080/api
 
 ---
 
-## Installation rapide
+## Ce que tu dois écrire dans les `.env`
 
-### API
-```bash
-pnpm --filter @workspace/api-server run dev
+### `artifacts/api-server/.env`
+```env
+DATABASE_URL=mysql://root:@localhost:3306/elitegym_db
+SESSION_SECRET=elitegym_secret_tres_long_et_aleatoire_2026
+PORT=8080
 ```
+
+### `artifacts/elitegym/.env`
+```env
+EXPO_PUBLIC_API_URL=http://192.168.1.42:8080/api
+```
+
+> Si MySQL WAMP a un mot de passe root, remplace `root:@` par `root:TON_MOT_DE_PASSE@`.
+
+---
+
+## Architecture
+
+### Backend
+- Node.js + Express
+- Authentification JWT
+- MySQL via `mysql2`
+- Routes : auth, admin, cours, réservations, présences, abonnements, coachs, progrès, exercices, avis, stats
 
 ### Mobile
-```bash
-pnpm --filter @workspace/elitegym run dev
-```
+- Expo Router
+- React Native
+- Context pour la session utilisateur
+- Un seul point de config : `EXPO_PUBLIC_API_URL`
+
+### Base de données
+- MySQL sur WAMP Server
+- Tables principales : utilisateur, membre, coach, cours, réservation, paiement, abonnement, formule_abonnement, suivi_performance, programme_entrainement, avis, equipement, journal_audit
 
 ---
 
@@ -64,6 +88,49 @@ pnpm --filter @workspace/elitegym run dev
 - Audit
 - Sauvegarde
 - Paramètres
+
+---
+
+## Installation et configuration
+
+### 1. Base de données
+- Installer WAMP Server
+- Démarrer MySQL
+- Créer la base `elitegym_db`
+- Importer le schéma SQL
+
+### 2. Configurer l’API
+Créer `artifacts/api-server/.env` avec :
+```env
+DATABASE_URL=mysql://root:@localhost:3306/elitegym_db
+SESSION_SECRET=elitegym_secret_tres_long_et_aleatoire_2026
+PORT=8080
+```
+
+### 3. Configurer le mobile
+Créer `artifacts/elitegym/.env` avec :
+```env
+EXPO_PUBLIC_API_URL=http://192.168.1.42:8080/api
+```
+
+### 4. Lancer l’API
+```bash
+pnpm --filter @workspace/api-server run dev
+```
+
+### 5. Lancer le mobile
+```bash
+pnpm --filter @workspace/elitegym run dev
+```
+
+---
+
+## Comment ça fonctionne
+
+- Le mobile lit `EXPO_PUBLIC_API_URL`
+- L’API appelle MySQL via `DATABASE_URL`
+- Les amis changent seulement la valeur de `EXPO_PUBLIC_API_URL` dans leur fichier `.env`
+- Aucun changement dans le code n’est nécessaire
 
 ---
 
