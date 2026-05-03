@@ -8,6 +8,7 @@ import React, {
   ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { WS_URL } from "./config";
 
 export type Notif = {
   id: string;
@@ -41,13 +42,7 @@ export function NotifProvider({ children }: { children: ReactNode }) {
       const token = await AsyncStorage.getItem("token");
       if (!token || !isMounted) return;
 
-      const domain = process.env["EXPO_PUBLIC_DOMAIN"] ?? "";
-      if (!domain) return;
-
-      const proto = domain.startsWith("https") ? "wss" : "ws";
-      const host = domain.replace(/^https?:\/\//, "");
-      const url = `${proto}://${host}/api/ws?token=${token}`;
-
+      const url = `${WS_URL}/api/ws?token=${token}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
 

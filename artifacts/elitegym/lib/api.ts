@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+import { API_URL } from "./config";
 
 async function getToken(): Promise<string | null> {
   const val = await AsyncStorage.getItem("elitegym_user");
@@ -16,7 +15,7 @@ async function request(path: string, options: RequestInit = {}) {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur réseau");
   return data;
