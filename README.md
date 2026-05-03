@@ -39,7 +39,7 @@ EXPO_PUBLIC_API_URL=http://192.168.1.42:8080/api
 
 ---
 
-## Architecture
+## Architecture du projet
 
 ### Backend
 - Node.js + Express
@@ -56,6 +56,41 @@ EXPO_PUBLIC_API_URL=http://192.168.1.42:8080/api
 ### Base de données
 - MySQL sur WAMP Server
 - Tables principales : utilisateur, membre, coach, cours, réservation, paiement, abonnement, formule_abonnement, suivi_performance, programme_entrainement, avis, equipement, journal_audit
+
+### Structure des dossiers
+```text
+artifacts/
+├── api-server/
+│   ├── src/
+│   │   ├── lib/
+│   │   │   ├── db.ts
+│   │   │   ├── auth.ts
+│   │   │   └── logger.ts
+│   │   └── routes/
+│   │       ├── auth.ts
+│   │       ├── admin.ts
+│   │       ├── cours.ts
+│   │       ├── reservations.ts
+│   │       ├── presences.ts
+│   │       ├── abonnements.ts
+│   │       ├── coachs.ts
+│   │       ├── progress.ts
+│   │       ├── exercices.ts
+│   │       ├── avis.ts
+│   │       └── stats.ts
+│   └── build.mjs
+└── elitegym/
+    ├── app/
+    │   ├── admin.tsx
+    │   ├── coach.tsx
+    │   ├── login.tsx
+    │   └── (tabs)/profil.tsx
+    ├── lib/
+    │   ├── api.ts
+    │   ├── config.ts
+    │   └── notifications.tsx
+    └── components/
+```
 
 ---
 
