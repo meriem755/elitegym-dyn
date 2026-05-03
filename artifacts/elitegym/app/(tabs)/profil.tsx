@@ -11,7 +11,7 @@ import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
 
-type Section = "profil" | "securite" | "progress" | "presence";
+type Section = "profil" | "securite" | "progress" | "presence" | "paiements";
 
 function StatPill({ label, value, color }: { label: string; value: any; color: string }) {
   return (
@@ -106,6 +106,9 @@ export default function ProfilScreen() {
   const [presenceSemaines, setPresenceSemaines] = useState<any[]>([]);
   const [loadingPresence, setLoadingPresence] = useState(false);
 
+  const [paiements, setPaiements] = useState<any[]>([]);
+  const [loadingPaiements, setLoadingPaiements] = useState(false);
+
   // Avis map: id_cours → { note, commentaire }
   const [avisMap, setAvisMap] = useState<Record<number, { note: number; commentaire: string }>>({});
   // Modal notation
@@ -114,9 +117,20 @@ export default function ProfilScreen() {
   const [avisDraftComment, setAvisDraftComment] = useState("");
   const [avisLoading, setAvisLoading] = useState(false);
 
+  const loadPaiements = async () => {
+    if (!user?.id_membre) return;
+    setLoadingPaiements(true);
+    try {
+      const data = await api.get(`/presences/membre/${user.id_membre}`);
+      setPaiements(data);
+    } catch {}
+    setLoadingPaiements(false);
+  };
+
   useEffect(() => {
     if (section === "progress" && user?.id_membre) loadProgress();
     if (section === "presence" && user?.id_membre) loadPresence();
+    if (section === "paiements" && user?.id_membre) loadPaiements();
   }, [section]);
 
   const loadProgress = async () => {
@@ -226,8 +240,9 @@ export default function ProfilScreen() {
     { key: "profil",   label: "Profil",     icon: "user" },
     { key: "securite", label: "Paramètres", icon: "settings" },
     ...(user?.role === "membre" ? [
-      { key: "presence" as Section, label: "Présence", icon: "bar-chart-2" },
-      { key: "progress" as Section, label: "Progrès",  icon: "trending-up" },
+      { key: "paiements" as Section, label: "Paiements",  icon: "credit-card" },
+      { key: "presence"  as Section, label: "Présence",   icon: "bar-chart-2" },
+      { key: "progress"  as Section, label: "Progrès",    icon: "trending-up" },
     ] : []),
   ];
 
@@ -493,6 +508,75 @@ export default function ProfilScreen() {
               </Text>
               <EliteButton title="Réessayer" onPress={loadPresence} variant="secondary" small />
             </View>
+          )}
+        </>
+      )}
+
+      {/* ── PAIEMENTS ── */}
+      {section === "paiements" && user?.role === "membre" && (
+        <>
+          {loadingPaiements ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={[styles.current, { color: colors.mutedForeground }]}>Chargement...</Text>
+            </View>
+          ) : paiements.length === 0 ? (
+            <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.emptyBlock}>
+                <Feather name="credit-card" size={30} color={colors.mutedForeground} />
+                <Text style={[styles.current, { color: colors.mutedForeground, textAlign: "center" }]}>
+                  Aucun paiement enregistré pour votre compte.
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <>
+              <View style={[styles.section, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Résumé</Text>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View style={[sp.pill, { backgroundColor: colors.primary + "15", flex: 1 }]}>
+                    <Text style={[sp.value, { color: colors.primary }]}>
+                      {paiements.filter((p: any) => p.statut === "valide").reduce((s: number, p: any) => s + Number(p.montant), 0).toLocaleString()} DA
+                    </Text>
+                    <Text style={[sp.label, { color: colors.primary }]}>Total payé</Text>
+                  </View>
+                  <View style={[sp.pill, { backgroundColor: "#10b98115", flex: 1 }]}>
+                    <Text style={[sp.value, { color: "#10b981" }]}>{paiements.filter((p: any) => p.statut === "valide").length}</Text>
+                    <Text style={[sp.label, { color: "#10b981" }]}>Paiements</Text>
+                  </View>
+                </View>
+              </View>
+
+              <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Historique des paiements</Text>
+              {paiements.map((p: any) => (
+                <View key={p.id_paiement} style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, gap: 6 }]}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.sectionTitle, { color: colors.foreground, fontSize: 14 }]}>{p.motif || "Paiement"}</Text>
+                      {p.formule_nom && (
+                        <Text style={[styles.current, { color: colors.primary, fontSize: 12 }]}>{p.formule_nom}</Text>
+                      )}
+                      <Text style={[styles.current, { color: colors.mutedForeground, fontSize: 12 }]}>
+                        {new Date(p.date_heure).toLocaleDateString("fr-FR")} · {p.mode_paiement}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end", gap: 4 }}>
+                      <Text style={{ fontSize: 16, fontWeight: "800", color: p.statut === "valide" ? "#10b981" : "#ef4444" }}>
+                        {Number(p.montant).toLocaleString()} DA
+                      </Text>
+                      <View style={[
+                        { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+                        { backgroundColor: p.statut === "valide" ? "#10b98120" : "#ef444420" },
+                      ]}>
+                        <Text style={{ fontSize: 11, fontWeight: "700", color: p.statut === "valide" ? "#10b981" : "#ef4444" }}>
+                          {p.statut === "valide" ? "✓ Validé" : p.statut}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </>
           )}
         </>
       )}

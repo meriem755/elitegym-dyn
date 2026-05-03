@@ -8,7 +8,7 @@ import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
 
-type Tab = "cours" | "avis" | "membres" | "progress" | "exercices" | "parametres";
+type Tab = "cours" | "presences" | "avis" | "membres" | "progress" | "exercices" | "parametres";
 
 const STATUT_STYLE: Record<string, { color: string; label: string }> = {
   en_attente: { color: "#f59e0b", label: "En attente" },
@@ -58,6 +58,14 @@ export default function CoachDashboard() {
   const [suiviForm, setSuiviForm] = useState({ id_membre: "", poids_kg: "", imc: "", tour_taille: "", observations: "" });
   const [loading, setLoading] = useState(false);
 
+  // Présences
+  const [coursPasses, setCoursPasses] = useState<any[]>([]);
+  const [selectedCours, setSelectedCours] = useState<any>(null);
+  const [presencesMembres, setPresencesMembres] = useState<any[]>([]);
+  const [presencesState, setPresencesState] = useState<Record<number, boolean>>({});
+  const [loadingPresences, setLoadingPresences] = useState(false);
+  const [savingPresences, setSavingPresences] = useState(false);
+
   const load = async () => {
     if (!user?.id_coach) return;
     try {
@@ -96,6 +104,7 @@ export default function CoachDashboard() {
   useEffect(() => {
     if (tab === "progress" || tab === "exercices") loadProgress();
     if (tab === "avis") loadAvis();
+    if (tab === "presences") loadCoursPasses();
   }, [tab]);
 
   const onRefresh = async () => {
@@ -152,6 +161,48 @@ export default function CoachDashboard() {
     finally { setLoading(false); }
   };
 
+  const loadCoursPasses = async () => {
+    if (!user?.id_coach) return;
+    try {
+      const c = await api.get(`/cours/coach/${user.id_coach}`);
+      const today = new Date().toISOString().slice(0, 10);
+      setCoursPasses(c.filter((x: any) => x.date_cours?.slice(0, 10) <= today && x.statut === "publie"));
+    } catch {}
+  };
+
+  const handleSelectCours = async (cours: any) => {
+    setSelectedCours(cours);
+    setPresencesState({});
+    setLoadingPresences(true);
+    try {
+      const members = await api.get(`/presences/cours/${cours.id_cours}`);
+      setPresencesMembres(members);
+      const state: Record<number, boolean> = {};
+      members.forEach((m: any) => { state[m.id_reservation] = !!m.present; });
+      setPresencesState(state);
+    } catch {}
+    setLoadingPresences(false);
+  };
+
+  const handleMarquerPresences = async () => {
+    if (!selectedCours) return;
+    setSavingPresences(true);
+    try {
+      const presences = presencesMembres.map((m: any) => ({
+        id_reservation: m.id_reservation,
+        id_membre: m.id_membre,
+        present: !!presencesState[m.id_reservation],
+      }));
+      await api.post("/presences/marquer", {
+        id_cours: selectedCours.id_cours,
+        presences,
+        id_util_coach: user?.id,
+      });
+      Alert.alert("Succès ✓", "Présences enregistrées");
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    setSavingPresences(false);
+  };
+
   const handleChangeMdp = async () => {
     if (!ancienMdp || !nouveauMdp) { Alert.alert("Erreur", "Remplissez les deux champs"); return; }
     if (nouveauMdp.length < 6) { Alert.alert("Erreur", "Mot de passe trop court (min 6 caractères)"); return; }
@@ -188,6 +239,7 @@ export default function CoachDashboard() {
 
   const TABS: { key: Tab; label: string; icon: string }[] = [
     { key: "cours",      label: "Planning",   icon: "calendar" },
+    { key: "presences",  label: "Présences",  icon: "check-circle" },
     { key: "avis",       label: "Avis",        icon: "star" },
     { key: "membres",    label: "Membres",     icon: "users" },
     { key: "progress",   label: "Suivi",       icon: "trending-up" },
@@ -265,6 +317,98 @@ export default function CoachDashboard() {
                 </View>
               );
             })}
+          </>
+        )}
+
+        {/* ── PRÉSENCES ── */}
+        {tab === "presences" && (
+          <>
+            <View style={[styles.infoBox, { backgroundColor: "#10b98110", borderColor: "#10b98130" }]}>
+              <Text style={[styles.infoText, { color: "#065f46" }]}>
+                ✅ Sélectionnez un cours passé pour enregistrer les présences des membres.
+              </Text>
+            </View>
+            {coursPasses.length === 0 ? (
+              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: "center", paddingVertical: 30 }]}>
+                <Feather name="calendar" size={30} color={colors.mutedForeground} />
+                <Text style={[styles.coursInfo, { color: colors.mutedForeground, marginTop: 8, textAlign: "center" }]}>
+                  Aucun cours passé approuvé.{"\n"}Les cours doivent d'abord être publiés.
+                </Text>
+              </View>
+            ) : (
+              <>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Cours passés — sélectionnez un cours</Text>
+                {coursPasses.map((c: any) => {
+                  const isSelected = selectedCours?.id_cours === c.id_cours;
+                  return (
+                    <TouchableOpacity key={c.id_cours} onPress={() => handleSelectCours(c)}
+                      style={[styles.card, { backgroundColor: isSelected ? colors.primary + "15" : colors.card, borderColor: isSelected ? colors.primary : colors.border, borderWidth: isSelected ? 2 : 1 }]}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.coursNom, { color: colors.foreground }]}>{c.type_cours}</Text>
+                          <Text style={[styles.coursInfo, { color: colors.mutedForeground }]}>
+                            📅 {c.date_cours?.slice(0,10)} · {c.heure_debut?.slice(0,5)} · {c.salle}
+                          </Text>
+                        </View>
+                        {isSelected && <Feather name="check-circle" size={20} color={colors.primary} />}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                {selectedCours && (
+                  <>
+                    <Text style={[styles.sectionTitle, { color: colors.foreground, marginTop: 8 }]}>
+                      Membres inscrits — {selectedCours.type_cours}
+                    </Text>
+                    {loadingPresences ? (
+                      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: "center", padding: 20 }]}>
+                        <Text style={{ color: colors.mutedForeground }}>Chargement...</Text>
+                      </View>
+                    ) : presencesMembres.length === 0 ? (
+                      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: "center", padding: 20 }]}>
+                        <Text style={{ color: colors.mutedForeground, textAlign: "center" }}>Aucun membre inscrit à ce cours</Text>
+                      </View>
+                    ) : (
+                      <>
+                        {presencesMembres.map((m: any) => {
+                          const isPresent = !!presencesState[m.id_reservation];
+                          return (
+                            <TouchableOpacity key={m.id_reservation}
+                              onPress={() => setPresencesState((prev) => ({ ...prev, [m.id_reservation]: !prev[m.id_reservation] }))}
+                              style={[styles.card, { backgroundColor: isPresent ? "#10b98110" : colors.card, borderColor: isPresent ? "#10b981" : colors.border, borderWidth: 1.5 }]}
+                            >
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                                <View style={[styles.avatar, { backgroundColor: isPresent ? "#10b98120" : colors.primary + "20" }]}>
+                                  <Text style={[styles.avatarText, { color: isPresent ? "#10b981" : colors.primary }]}>{m.prenom?.[0]}{m.nom?.[0]}</Text>
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={[styles.coursNom, { color: colors.foreground }]}>{m.prenom} {m.nom}</Text>
+                                  <Text style={[styles.coursInfo, { color: colors.mutedForeground }]}>{m.telephone || ""}</Text>
+                                </View>
+                                <View style={[styles.presenceBadge, { backgroundColor: isPresent ? "#10b98120" : colors.background, borderColor: isPresent ? "#10b981" : colors.border }]}>
+                                  <Feather name={isPresent ? "check" : "x"} size={16} color={isPresent ? "#10b981" : colors.mutedForeground} />
+                                  <Text style={[styles.presenceText, { color: isPresent ? "#10b981" : colors.mutedForeground }]}>{isPresent ? "Présent" : "Absent"}</Text>
+                                </View>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                        <EliteButton
+                          title={savingPresences ? "Enregistrement..." : "Enregistrer les présences"}
+                          onPress={handleMarquerPresences}
+                          loading={savingPresences}
+                          variant="primary"
+                        />
+                        <Text style={[styles.coursInfo, { color: colors.mutedForeground, textAlign: "center" }]}>
+                          {Object.values(presencesState).filter(Boolean).length} présent(s) sur {presencesMembres.length}
+                        </Text>
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
           </>
         )}
 
@@ -595,7 +739,8 @@ const styles = StyleSheet.create({
   divider: { height: 1, marginVertical: 4 },
   avisCard: { borderRadius: 8, padding: 10, borderWidth: 1, gap: 4 },
   infoRow: { flexDirection: "row", alignItems: "center", gap: 12, borderBottomWidth: 1, borderBottomColor: "transparent", paddingVertical: 8 },
-  sectionTitle: { fontSize: 14, fontWeight: "700" },
+  presenceBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1.5 },
+  presenceText: { fontSize: 12, fontWeight: "700" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalContent: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12, maxHeight: "90%" },
   modalTitle: { fontSize: 18, fontWeight: "800" },

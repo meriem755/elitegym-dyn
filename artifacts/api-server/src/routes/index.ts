@@ -12,6 +12,7 @@ import progressRouter from "./progress.js";
 import exercicesRouter from "./exercices.js";
 import chatRouter from "./chat.js";
 import avisRouter from "./avis.js";
+import presencesRouter from "./presences.js";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use("/progress", progressRouter);
 router.use("/exercices", exercicesRouter);
 router.use("/chat", chatRouter);
 router.use("/avis", avisRouter);
+router.use("/presences", presencesRouter);
 
 export default router;
