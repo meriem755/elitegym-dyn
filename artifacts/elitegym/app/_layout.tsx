@@ -26,12 +26,12 @@ function RootLayoutNav() {
   const segments = useSegments();
 
   useEffect(() => {
-    if (isLoading) return;
-    const inTabs = segments[0] === "(tabs)";
-    const inLogin = segments[0] === "login";
-    const inCoach = segments[0] === "coach";
-    const inAdmin = segments[0] === "admin";
-    const inLanding = segments[0] === undefined || segments[0] === "";
+  if (isLoading) return;
+  
+  const inTabs = segments[0] === "(tabs)";
+  const inLogin = segments[0] === "login";
+  const inCoach = segments[0] === "coach";
+  const inAdmin = segments[0] === "admin";
 
     if (!user) {
       // Public: allow landing page and login

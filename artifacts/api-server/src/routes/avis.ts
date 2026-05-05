@@ -4,7 +4,6 @@ import { authMiddleware } from "../lib/auth.js";
 
 const router = Router();
 
-// Créer la table si elle n'existe pas encore
 async function ensureTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS avis (
@@ -32,24 +31,31 @@ router.post("/", authMiddleware, async (req, res) => {
     return res.status(400).json({ error: "Note doit être entre 1 et 5" });
   }
   try {
-    // Vérifier que le membre a bien suivi ce cours (réservation confirmée passée)
+    // Vérifier que le membre a bien une réservation confirmée pour ce cours
+    // (date_cours <= CURDATE pour inclure aujourd'hui)
     const [resa]: any = await pool.query(`
       SELECT r.id_reservation
       FROM reservation r
       JOIN cours c ON r.id_cours = c.id_cours
       WHERE r.id_membre = ? AND r.id_cours = ?
         AND r.statut = 'confirmee'
-        AND c.date_cours < CURDATE()
+        AND c.date_cours <= CURDATE()
     `, [id_membre, id_cours]);
+
     if (!resa.length) {
-      return res.status(403).json({ error: "Vous ne pouvez noter que les cours que vous avez suivis" });
+      return res.status(403).json({
+        error: "Vous ne pouvez noter que les cours auxquels vous avez participé"
+      });
     }
 
-    // Upsert
+    // Upsert (créer ou mettre à jour)
     await pool.query(`
       INSERT INTO avis (id_membre, id_cours, note, commentaire)
       VALUES (?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE note = VALUES(note), commentaire = VALUES(commentaire), date_avis = NOW()
+      ON DUPLICATE KEY UPDATE
+        note = VALUES(note),
+        commentaire = VALUES(commentaire),
+        date_avis = NOW()
     `, [id_membre, id_cours, note, commentaire || null]);
 
     res.json({ success: true });
@@ -59,7 +65,7 @@ router.post("/", authMiddleware, async (req, res) => {
   }
 });
 
-// GET /avis/membre/:id_membre — tous les avis déposés par un membre
+// GET /avis/membre/:id_membre — avis déposés par le membre
 router.get("/membre/:id_membre", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
@@ -77,7 +83,7 @@ router.get("/membre/:id_membre", authMiddleware, async (req, res) => {
   }
 });
 
-// GET /avis/cours/:id_cours — tous les avis pour un cours
+// GET /avis/cours/:id_cours
 router.get("/cours/:id_cours", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
@@ -96,7 +102,7 @@ router.get("/cours/:id_cours", authMiddleware, async (req, res) => {
   }
 });
 
-// GET /avis/coach/:id_coach — tous les avis des cours du coach, avec moyennes
+// GET /avis/coach/:id_coach — avis + moyennes par cours
 router.get("/coach/:id_coach", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
@@ -112,13 +118,9 @@ router.get("/coach/:id_coach", authMiddleware, async (req, res) => {
       ORDER BY a.date_avis DESC
     `, [req.params.id_coach]);
 
-    // Ajouter les stats par cours
     const [moyennes]: any = await pool.query(`
       SELECT
-        c.id_cours,
-        c.type_cours,
-        c.date_cours,
-        c.salle,
+        c.id_cours, c.type_cours, c.date_cours, c.salle,
         ROUND(AVG(a.note), 1) AS note_moyenne,
         COUNT(a.id_avis) AS nb_avis
       FROM cours c
@@ -136,7 +138,7 @@ router.get("/coach/:id_coach", authMiddleware, async (req, res) => {
   }
 });
 
-// GET /avis/admin — tous les avis (pour admin)
+// GET /avis/admin
 router.get("/admin", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
@@ -151,8 +153,7 @@ router.get("/admin", authMiddleware, async (req, res) => {
       JOIN utilisateur uc ON co.id_util = uc.id_util
       JOIN membre me ON a.id_membre = me.id_membre
       JOIN utilisateur um ON me.id_util = um.id_util
-      ORDER BY a.date_avis DESC
-      LIMIT 100
+      ORDER BY a.date_avis DESC LIMIT 200
     `);
     res.json(rows);
   } catch (err: any) {

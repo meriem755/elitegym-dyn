@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl, Platform,
-  Modal, TouchableOpacity, Alert, ActivityIndicator,
+  Modal, TouchableOpacity, Alert, TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -11,22 +11,20 @@ import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
 
-type Tab =
-  | "dashboard" | "membres" | "coachs" | "planning"
-  | "paiements" | "abonnements" | "equipements" | "audit" | "parametres";
+type Tab = "dashboard"|"membres"|"coachs"|"planning"|"paiements"|"abonnements"|"equipements"|"audit"|"parametres";
 
 const ETAT_INFO: Record<string, { label: string; color: string }> = {
-  bon:          { label: "Bon état",      color: "#10b981" },
-  usure:        { label: "Usure",         color: "#f59e0b" },
-  maintenance:  { label: "Maintenance",   color: "#3b82f6" },
-  hors_service: { label: "Hors service",  color: "#ef4444" },
+  bon: { label: "Bon état", color: "#10b981" },
+  usure: { label: "Usure", color: "#f59e0b" },
+  maintenance: { label: "Maintenance", color: "#3b82f6" },
+  hors_service: { label: "Hors service", color: "#ef4444" },
 };
-
 const STATUT_COLORS: Record<string, string> = {
   en_attente: "#f59e0b", publie: "#10b981", annule: "#ef4444", termine: "#6b7280",
 };
-
-const MODES_PAIEMENT = ["espèces", "CIB", "BaridiMob", "virement", "chèque"];
+const MODES_PAIEMENT = ["espèces","CIB","BaridiMob","virement","chèque"];
+const JOURS_FR = ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
+const MOIS_FR = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
 function Empty({ icon, text }: { icon: string; text: string }) {
   const colors = useColors();
@@ -36,6 +34,46 @@ function Empty({ icon, text }: { icon: string; text: string }) {
       <Text style={[s.sub, { color: colors.mutedForeground, textAlign: "center" }]}>{text}</Text>
     </View>
   );
+}
+
+function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const colors = useColors();
+  return (
+    <View style={[s.searchBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <Feather name="search" size={14} color={colors.mutedForeground} />
+      <TextInput
+        style={[s.searchInput, { color: colors.foreground }]}
+        placeholder={placeholder || "Rechercher..."}
+        placeholderTextColor={colors.mutedForeground}
+        value={value}
+        onChangeText={onChange}
+      />
+      {value.length > 0 && (
+        <TouchableOpacity onPress={() => onChange("")}>
+          <Feather name="x" size={14} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+function generatePdfHtml(p: any) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu</title>
+<style>body{font-family:Arial,sans-serif;padding:40px;max-width:600px;margin:0 auto}
+h1{color:#E63946;border-bottom:2px solid #E63946;padding-bottom:10px}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee}
+.label{color:#666}.value{font-weight:bold}.total{font-size:1.4em;color:#E63946}
+.footer{margin-top:40px;text-align:center;color:#999;font-size:12px}
+</style></head><body>
+<h1>🏋️ Elite Gym — Reçu de paiement</h1>
+<div class="row"><span class="label">N° Paiement</span><span class="value">#${p.id_paiement||"—"}</span></div>
+<div class="row"><span class="label">Membre</span><span class="value">${p.prenom||""} ${p.nom||""}</span></div>
+<div class="row"><span class="label">Date</span><span class="value">${new Date(p.date_heure||Date.now()).toLocaleString("fr-FR")}</span></div>
+<div class="row"><span class="label">Motif</span><span class="value">${p.motif||"Abonnement"}${p.formule_nom?" — "+p.formule_nom:""}</span></div>
+<div class="row"><span class="label">Mode</span><span class="value">${p.mode_paiement||"espèces"}</span></div>
+<div class="row" style="margin-top:16px"><span class="label total">MONTANT</span><span class="value total">${Number(p.montant||0).toLocaleString()} DA</span></div>
+<div class="footer">Elite Gym · Reçu généré le ${new Date().toLocaleString("fr-FR")}</div>
+</body></html>`;
 }
 
 export default function AdminDashboard() {
@@ -48,23 +86,36 @@ export default function AdminDashboard() {
   const [membres, setMembres] = useState<any[]>([]);
   const [coachs, setCoachs] = useState<any[]>([]);
   const [coursEnAttente, setCoursEnAttente] = useState<any[]>([]);
+  const [allCours, setAllCours] = useState<any[]>([]);
   const [paiements, setPaiements] = useState<any[]>([]);
   const [audit, setAudit] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({});
   const [formules, setFormules] = useState<any[]>([]);
   const [abonnements, setAbonnements] = useState<any[]>([]);
   const [equipements, setEquipements] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
 
-  // Modals state
+  // Search
+  const [searchMembre, setSearchMembre] = useState("");
+  const [searchCoach, setSearchCoach] = useState("");
+  const [searchAbo, setSearchAbo] = useState("");
+
+  // Calendar
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [showAddCours, setShowAddCours] = useState(false);
+  const [coursForm, setCoursForm] = useState({ id_coach: "", type_cours: "", date_cours: "", heure_debut: "", duree_minutes: "60", salle: "", capacite_max: "20" });
+
+  // Modals
   const [showAddMembre, setShowAddMembre] = useState(false);
   const [showAddCoach, setShowAddCoach] = useState(false);
-  const [editTarget, setEditTarget] = useState<{ type: "membre" | "coach"; data: any } | null>(null);
+  const [editTarget, setEditTarget] = useState<{ type: "membre"|"coach"; data: any }|null>(null);
   const [showAddPaiement, setShowAddPaiement] = useState(false);
   const [showAddFormule, setShowAddFormule] = useState(false);
   const [editFormule, setEditFormule] = useState<any>(null);
   const [showAffecterAbo, setShowAffecterAbo] = useState(false);
   const [showAddEquipement, setShowAddEquipement] = useState(false);
   const [editEquipement, setEditEquipement] = useState<any>(null);
+  const [showNotifs, setShowNotifs] = useState(false);
   const [loading, setLoading] = useState(false);
   const [backupLoading, setBackupLoading] = useState(false);
 
@@ -75,8 +126,6 @@ export default function AdminDashboard() {
   const [formulForm, setFormulForm] = useState({ nom: "", description: "", tarif: "", duree_jours: "" });
   const [aboForm, setAboForm] = useState({ id_membre: "", id_formule: "", date_debut: new Date().toISOString().slice(0,10) });
   const [equipForm, setEquipForm] = useState({ nom: "", categorie: "Musculation", etat: "bon", quantite: "1", notes: "" });
-
-  // Paramètres
   const [ancienMdp, setAncienMdp] = useState("");
   const [nouveauMdp, setNouveauMdp] = useState("");
   const [nouveauTel, setNouveauTel] = useState("");
@@ -85,7 +134,7 @@ export default function AdminDashboard() {
 
   const load = async () => {
     try {
-      const [m, c, p, a, st, cours, f, ab, eq] = await Promise.all([
+      const [m, c, p, a, st, cours, f, ab, eq, allC, notifs] = await Promise.all([
         api.get("/admin/membres"),
         api.get("/admin/coachs"),
         api.get("/admin/paiements"),
@@ -95,24 +144,51 @@ export default function AdminDashboard() {
         api.get("/admin/formules").catch(() => []),
         api.get("/admin/abonnements").catch(() => []),
         api.get("/admin/equipements").catch(() => []),
+        api.get("/admin/cours").catch(() => []),
+        api.get(`/admin/notifications?id_util=${user?.id}`).catch(() => []),
       ]);
       setMembres(m); setCoachs(c); setPaiements(p); setAudit(a);
       setStats(st); setCoursEnAttente(cours);
       setFormules(f); setAbonnements(ab); setEquipements(eq);
+      setAllCours(allC); setNotifications(notifs);
     } catch {}
   };
 
   useEffect(() => { load(); }, []);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  // ── Handlers membres/coachs ───────────────────────────────
+  // Filtered
+  const filteredMembres = membres.filter(m =>
+    `${m.prenom} ${m.nom}`.toLowerCase().includes(searchMembre.toLowerCase()) ||
+    (m.telephone || "").includes(searchMembre)
+  );
+  const filteredCoachs = coachs.filter(c =>
+    `${c.prenom} ${c.nom}`.toLowerCase().includes(searchCoach.toLowerCase()) ||
+    (c.specialite || "").toLowerCase().includes(searchCoach.toLowerCase())
+  );
+  const filteredAbonnements = abonnements.filter(a =>
+    `${a.prenom} ${a.nom}`.toLowerCase().includes(searchAbo.toLowerCase()) ||
+    (a.formule_nom || "").toLowerCase().includes(searchAbo.toLowerCase())
+  );
+
+  // Calendar
+  const calYear = calendarDate.getFullYear();
+  const calMonth = calendarDate.getMonth();
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const coursMonth = allCours.filter(c => {
+    const d = new Date(c.date_cours);
+    return d.getFullYear() === calYear && d.getMonth() === calMonth;
+  });
+  const coursForDay = (day: number) => coursMonth.filter(c => new Date(c.date_cours).getDate() === day);
+
+  // Handlers membres
   const handleAjouterMembre = async () => {
-    if (!newForm.nom || !newForm.prenom || (!newForm.telephone && !newForm.email)) {
-      Alert.alert("Erreur", "Remplissez nom, prénom et au moins un contact"); return;
-    }
+    if (!newForm.nom || !newForm.prenom) { Alert.alert("Erreur", "Nom et prénom requis"); return; }
+    if (!newForm.telephone && !newForm.email) { Alert.alert("Erreur", "Téléphone ou email requis"); return; }
     setLoading(true);
     try {
-      await api.post("/admin/membres", newForm);
+      await api.post("/admin/membres", { nom: newForm.nom, prenom: newForm.prenom, telephone: newForm.telephone || undefined, email: newForm.email || undefined });
       Alert.alert("Succès", "Membre ajouté\nMot de passe par défaut : elitegym2026");
       setShowAddMembre(false);
       setNewForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
@@ -122,13 +198,12 @@ export default function AdminDashboard() {
   };
 
   const handleAjouterCoach = async () => {
-    if (!newForm.nom || !newForm.prenom || (!newForm.telephone && !newForm.email) || !newForm.specialite) {
-      Alert.alert("Erreur", "Remplissez tous les champs"); return;
-    }
+    if (!newForm.nom || !newForm.prenom || !newForm.specialite) { Alert.alert("Erreur", "Nom, prénom et spécialité requis"); return; }
+    if (!newForm.telephone && !newForm.email) { Alert.alert("Erreur", "Téléphone ou email requis"); return; }
     setLoading(true);
     try {
-      await api.post("/admin/coachs", newForm);
-      Alert.alert("Succès", "Coach ajouté\nMot de passe par défaut : elitegym2026");
+      await api.post("/admin/coachs", { nom: newForm.nom, prenom: newForm.prenom, telephone: newForm.telephone || undefined, email: newForm.email || undefined, specialite: newForm.specialite });
+      Alert.alert("Succès", "Coach ajouté\nMot de passe : elitegym2026");
       setShowAddCoach(false);
       setNewForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
       load();
@@ -140,7 +215,6 @@ export default function AdminDashboard() {
     setEditTarget({ type: "membre", data: m });
     setEditForm({ nom: m.nom, prenom: m.prenom, telephone: m.telephone || "", email: m.email || "", specialite: "" });
   };
-
   const openEditCoach = (c: any) => {
     setEditTarget({ type: "coach", data: c });
     setEditForm({ nom: c.nom, prenom: c.prenom, telephone: c.telephone || "", email: c.email || "", specialite: c.specialite || "" });
@@ -150,41 +224,56 @@ export default function AdminDashboard() {
     if (!editTarget) return;
     setLoading(true);
     try {
-      if (editTarget.type === "membre") {
-        await api.put(`/admin/membres/${editTarget.data.id_membre}`, editForm);
-      } else {
-        await api.put(`/admin/coachs/${editTarget.data.id_coach}`, editForm);
-      }
-      Alert.alert("Succès", "Informations modifiées ✓");
-      setEditTarget(null);
+      if (editTarget.type === "membre") await api.put(`/admin/membres/${editTarget.data.id_membre}`, editForm);
+      else await api.put(`/admin/coachs/${editTarget.data.id_coach}`, editForm);
+      Alert.alert("Succès", "Modifié ✓");
+      setEditTarget(null); load();
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleSuspendre = (type: "membre"|"coach", item: any) => {
+    const actif = item.statut === 1;
+    const action = actif ? "Suspendre" : "Réactiver";
+    Alert.alert(`${action}`, `${action} ${item.prenom} ${item.nom} ?`, [
+      { text: "Annuler", style: "cancel" },
+      { text: action, style: actif ? "destructive" : "default", onPress: async () => {
+        try {
+          if (actif) {
+            if (type === "membre") await api.delete(`/admin/membres/${item.id_membre}`);
+            else await api.delete(`/admin/coachs/${item.id_coach}`);
+          } else {
+            if (type === "membre") await api.put(`/admin/membres/${item.id_membre}/activer`, {});
+            else await api.put(`/admin/coachs/${item.id_coach}/activer`, {});
+          }
+          load();
+        } catch (e: any) { Alert.alert("Erreur", e.message); }
+      }},
+    ]);
+  };
+
+  // Planning
+  const handleCreateCours = async () => {
+    if (!coursForm.id_coach || !coursForm.type_cours || !coursForm.date_cours || !coursForm.heure_debut || !coursForm.salle) {
+      Alert.alert("Erreur", "Remplissez tous les champs obligatoires"); return;
+    }
+    setLoading(true);
+    try {
+      await api.post("/admin/cours", { ...coursForm, id_coach: parseInt(coursForm.id_coach), duree_minutes: parseInt(coursForm.duree_minutes)||60, capacite_max: parseInt(coursForm.capacite_max)||20 });
+      Alert.alert("Succès", "Cours créé et publié ✓");
+      setShowAddCours(false);
+      setCoursForm({ id_coach: "", type_cours: "", date_cours: "", heure_debut: "", duree_minutes: "60", salle: "", capacite_max: "20" });
       load();
     } catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setLoading(false); }
   };
 
-  const handleDelete = (type: "membre" | "coach", id: number, nom: string) => {
-    Alert.alert("Confirmer suppression", `Supprimer ${nom} ?`, [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Supprimer", style: "destructive",
-        onPress: async () => {
-          try {
-            if (type === "membre") await api.delete(`/admin/membres/${id}`);
-            else await api.delete(`/admin/coachs/${id}`);
-            load();
-          } catch (e: any) { Alert.alert("Erreur", e.message); }
-        },
-      },
-    ]);
-  };
-
-  // ── Planning ──────────────────────────────────────────────
   const handleApprouver = async (id: number) => {
-    try { await api.put(`/admin/cours/${id}/approuver`); Alert.alert("Approuvé ✓", "Cours publié"); load(); }
+    try { await api.put(`/admin/cours/${id}/approuver`); Alert.alert("Approuvé ✓"); load(); }
     catch (e: any) { Alert.alert("Erreur", e.message); }
   };
   const handleRejeter = async (id: number) => {
-    Alert.alert("Confirmer", "Rejeter ce cours ?", [
+    Alert.alert("Rejeter ?", "Confirmer ?", [
       { text: "Annuler", style: "cancel" },
       { text: "Rejeter", style: "destructive", onPress: async () => {
         try { await api.put(`/admin/cours/${id}/rejeter`); load(); }
@@ -193,7 +282,7 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // ── Paiements ─────────────────────────────────────────────
+  // Paiements
   const handleAddPaiement = async () => {
     if (!paiForm.id_membre || !paiForm.montant) { Alert.alert("Erreur", "Sélectionnez un membre et entrez un montant"); return; }
     setLoading(true);
@@ -207,7 +296,18 @@ export default function AdminDashboard() {
     finally { setLoading(false); }
   };
 
-  // ── Formules ──────────────────────────────────────────────
+  const handleExportPdf = (p: any) => {
+    if (Platform.OS === "web") {
+      const html = generatePdfHtml(p);
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } else {
+      Alert.alert("Reçu PDF", `Reçu #${p.id_paiement} — ${Number(p.montant).toLocaleString()} DA\nDisponible sur la version web.`);
+    }
+  };
+
+  // Formules
   const handleSaveFormule = async () => {
     if (!formulForm.nom || !formulForm.tarif || !formulForm.duree_jours) { Alert.alert("Erreur", "Remplissez tous les champs"); return; }
     setLoading(true);
@@ -223,17 +323,18 @@ export default function AdminDashboard() {
     finally { setLoading(false); }
   };
 
-  const handleDeleteFormule = (f: any) => {
-    Alert.alert("Désactiver", `Désactiver la formule "${f.nom}" ?`, [
+  const handleToggleFormule = (f: any) => {
+    const action = f.actif ? "Désactiver" : "Activer";
+    Alert.alert(action, `${action} "${f.nom}" ?`, [
       { text: "Annuler", style: "cancel" },
-      { text: "Désactiver", style: "destructive", onPress: async () => {
-        try { await api.delete(`/admin/formules/${f.id_formule}`); load(); }
+      { text: action, onPress: async () => {
+        try { await api.put(`/admin/formules/${f.id_formule}/toggle`, {}); load(); }
         catch (e: any) { Alert.alert("Erreur", e.message); }
       }},
     ]);
   };
 
-  // ── Abonnements ───────────────────────────────────────────
+  // Abonnements
   const handleAffecterAbo = async () => {
     if (!aboForm.id_membre || !aboForm.id_formule) { Alert.alert("Erreur", "Sélectionnez un membre et une formule"); return; }
     setLoading(true);
@@ -247,15 +348,25 @@ export default function AdminDashboard() {
     finally { setLoading(false); }
   };
 
-  // ── Équipements ───────────────────────────────────────────
+  const handleResilierAbo = (a: any) => {
+    Alert.alert("Résilier", `Résilier l'abonnement de ${a.prenom} ${a.nom} ?`, [
+      { text: "Annuler", style: "cancel" },
+      { text: "Résilier", style: "destructive", onPress: async () => {
+        try { await api.put(`/admin/abonnements/${a.id_abonnement}/resilier`, {}); load(); }
+        catch (e: any) { Alert.alert("Erreur", e.message); }
+      }},
+    ]);
+  };
+
+  // Équipements
   const handleSaveEquipement = async () => {
-    if (!equipForm.nom) { Alert.alert("Erreur", "Entrez un nom d'équipement"); return; }
+    if (!equipForm.nom) { Alert.alert("Erreur", "Entrez un nom"); return; }
     setLoading(true);
     try {
       const body = { ...equipForm, quantite: parseInt(equipForm.quantite) || 1 };
       if (editEquipement) await api.put(`/admin/equipements/${editEquipement.id_equipement}`, body);
       else await api.post("/admin/equipements", body);
-      Alert.alert("Succès", editEquipement ? "Équipement modifié ✓" : "Équipement ajouté ✓");
+      Alert.alert("Succès", editEquipement ? "Modifié ✓" : "Ajouté ✓");
       setShowAddEquipement(false); setEditEquipement(null);
       setEquipForm({ nom: "", categorie: "Musculation", etat: "bon", quantite: "1", notes: "" });
       load();
@@ -273,24 +384,18 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // ── Backup ────────────────────────────────────────────────
   const handleBackup = async () => {
     setBackupLoading(true);
     try {
       const r = await api.post("/admin/backup", { id_util: user?.id });
-      Alert.alert("Sauvegarde réussie ✓",
-        `Effectuée le ${new Date(r.timestamp).toLocaleString("fr-FR")}\n`+
-        `${r.stats.membres} membres · ${r.stats.coachs} coachs · ${r.stats.paiements} paiements`
-      );
+      Alert.alert("Sauvegarde ✓", `${new Date(r.timestamp).toLocaleString("fr-FR")}\n${r.stats.membres} membres · ${r.stats.paiements} paiements`);
       load();
     } catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setBackupLoading(false); }
   };
 
-  // ── Paramètres ────────────────────────────────────────────
   const handleChangeMdp = async () => {
-    if (!ancienMdp || !nouveauMdp) { Alert.alert("Erreur", "Remplissez les deux champs"); return; }
-    if (nouveauMdp.length < 6) { Alert.alert("Erreur", "Min 6 caractères"); return; }
+    if (!ancienMdp || !nouveauMdp || nouveauMdp.length < 6) { Alert.alert("Erreur", "Vérifiez les champs (min 6 car.)"); return; }
     setLoadingParam(true);
     try {
       await api.post("/auth/change-password", { id_util: user?.id, ancien_mdp: ancienMdp, nouveau_mdp: nouveauMdp });
@@ -299,24 +404,18 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setLoadingParam(false); }
   };
-
   const handleChangeTel = async () => {
     if (!nouveauTel) return;
     setLoadingParam(true);
-    try {
-      await api.post("/auth/change-phone", { id_util: user?.id, telephone: nouveauTel });
-      Alert.alert("Succès", "Numéro modifié ✓"); setNouveauTel("");
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    try { await api.post("/auth/change-phone", { id_util: user?.id, telephone: nouveauTel }); Alert.alert("Succès", "Numéro modifié ✓"); setNouveauTel(""); }
+    catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setLoadingParam(false); }
   };
-
   const handleChangeEmail = async () => {
     if (!nouvelEmail) return;
     setLoadingParam(true);
-    try {
-      await api.post("/auth/change-email", { id_util: user?.id, email: nouvelEmail });
-      Alert.alert("Succès", "Email modifié ✓"); setNouvelEmail("");
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    try { await api.post("/auth/change-email", { id_util: user?.id, email: nouvelEmail }); Alert.alert("Succès", "Email modifié ✓"); setNouvelEmail(""); }
+    catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setLoadingParam(false); }
   };
 
@@ -324,7 +423,7 @@ export default function AdminDashboard() {
     { key: "dashboard",   label: "Tableau",     icon: "bar-chart-2" },
     { key: "membres",     label: "Membres",     icon: "users" },
     { key: "coachs",      label: "Coachs",      icon: "activity" },
-    { key: "planning",    label: "Planning",    icon: "check-square", badge: coursEnAttente.length },
+    { key: "planning",    label: "Planning",    icon: "calendar", badge: coursEnAttente.length },
     { key: "paiements",   label: "Paiements",   icon: "credit-card" },
     { key: "abonnements", label: "Abonnements", icon: "tag" },
     { key: "equipements", label: "Équipements", icon: "tool" },
@@ -332,31 +431,40 @@ export default function AdminDashboard() {
     { key: "parametres",  label: "Paramètres",  icon: "settings" },
   ];
 
-  // ── abonnements actifs/expirés stats ─────────────────────
   const aboActifs = abonnements.filter((a: any) => a.statut === "actif" && new Date(a.date_fin) >= new Date());
   const revenuMois = stats.revenu_mois ? Number(stats.revenu_mois).toLocaleString() : "—";
   const revenuTotal = stats.revenu_total ? Number(stats.revenu_total).toLocaleString() : "—";
+  const unreadNotifs = notifications.filter((n: any) => !n.lu).length;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header */}
-      <View style={[s.header, { backgroundColor: colors.secondary, paddingTop: Platform.OS === "web" ? 80 : insets.top }]}>
-        <View>
-          <Text style={s.headerTitle}>Espace Admin</Text>
-          <Text style={s.headerSub}>{user?.prenom} {user?.nom}</Text>
+      <View style={[s.header, { backgroundColor: colors.secondary, paddingTop: Platform.OS === "web" ? 20 : insets.top }]}>
+        <View style={s.headerAvatar}>
+          <Text style={s.headerAvatarText}>{user?.prenom?.[0]}{user?.nom?.[0]}</Text>
         </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.headerTitle}>{user?.prenom} {user?.nom}</Text>
+          <Text style={s.headerSub}>Administrateur</Text>
+        </View>
+        <TouchableOpacity onPress={() => setShowNotifs(true)} style={{ marginRight: 14, position: "relative" }}>
+          <Feather name="bell" size={22} color="rgba(255,255,255,0.9)" />
+          {unreadNotifs > 0 && (
+            <View style={s.notifBadge}><Text style={s.notifBadgeText}>{unreadNotifs}</Text></View>
+          )}
+        </TouchableOpacity>
         <TouchableOpacity onPress={logout}>
           <Feather name="log-out" size={22} color="rgba(255,255,255,0.8)" />
         </TouchableOpacity>
       </View>
 
-      {/* Stats strip */}
+      {/* Stats */}
       <View style={s.statsRow}>
         {[
-          { label: "Membres",  value: membres.length,         color: colors.primary },
-          { label: "Coachs",   value: coachs.length,          color: "#10b981" },
-          { label: "En att.", value: coursEnAttente.length,   color: "#f59e0b" },
-          { label: "Abo actifs", value: aboActifs.length,     color: "#8b5cf6" },
+          { label: "Membres",    value: membres.filter((m: any) => m.statut === 1).length, color: colors.primary },
+          { label: "Coachs",     value: coachs.filter((c: any) => c.statut === 1).length,  color: "#10b981" },
+          { label: "En att.",    value: coursEnAttente.length,                              color: "#f59e0b" },
+          { label: "Abo actifs", value: aboActifs.length,                                  color: "#8b5cf6" },
         ].map((st) => (
           <View key={st.label} style={[s.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[s.statNum, { color: st.color }]}>{st.value}</Text>
@@ -366,13 +474,10 @@ export default function AdminDashboard() {
       </View>
 
       {/* Tab bar */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={[s.tabBar, { borderBottomColor: colors.border }]}
-      >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[s.tabBar, { borderBottomColor: colors.border }]}>
         {TABS.map((t) => (
           <TouchableOpacity key={t.key} onPress={() => setTab(t.key)}
-            style={[s.tabBtn, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
-          >
+            style={[s.tabBtn, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}>
             <View style={{ position: "relative" }}>
               <Feather name={t.icon as any} size={14} color={tab === t.key ? colors.primary : colors.mutedForeground} />
               {t.badge && t.badge > 0 ? (
@@ -384,21 +489,20 @@ export default function AdminDashboard() {
         ))}
       </ScrollView>
 
-      <ScrollView
-        contentContainerStyle={[s.content, { paddingBottom: 80 }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      >
-        {/* ── DASHBOARD ── */}
+      <ScrollView contentContainerStyle={[s.content, { paddingBottom: 40 }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+
+        {/* DASHBOARD */}
         {tab === "dashboard" && (
           <>
             <View style={[s.card, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
               <Text style={[s.sectionTitle, { color: colors.foreground }]}>Supervision globale</Text>
               <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
                 {[
-                  { icon: "users",    label: "Membres actifs",     value: membres.length,           color: colors.primary },
-                  { icon: "activity", label: "Coachs actifs",      value: coachs.length,            color: "#10b981" },
-                  { icon: "tag",      label: "Abonnements actifs", value: aboActifs.length,         color: "#8b5cf6" },
-                  { icon: "check-circle", label: "Cours publiés",  value: stats.cours_publies ?? "—", color: "#3b82f6" },
+                  { icon: "users",    label: "Membres actifs",     value: membres.filter((m: any) => m.statut === 1).length, color: colors.primary },
+                  { icon: "activity", label: "Coachs actifs",      value: coachs.filter((c: any) => c.statut === 1).length,  color: "#10b981" },
+                  { icon: "tag",      label: "Abonnements actifs", value: aboActifs.length,                                   color: "#8b5cf6" },
+                  { icon: "check-circle", label: "Cours publiés",  value: stats.cours_publies ?? "—",                        color: "#3b82f6" },
                 ].map((it) => (
                   <View key={it.label} style={[s.dashCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                     <Feather name={it.icon as any} size={20} color={it.color} />
@@ -408,7 +512,6 @@ export default function AdminDashboard() {
                 ))}
               </View>
             </View>
-
             <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Text style={[s.sectionTitle, { color: colors.foreground }]}>Revenus</Text>
               <View style={{ flexDirection: "row", gap: 10 }}>
@@ -418,173 +521,231 @@ export default function AdminDashboard() {
                 </View>
                 <View style={[s.revCard, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30", flex: 1 }]}>
                   <Text style={[s.revNum, { color: colors.primary }]}>{revenuTotal} DA</Text>
-                  <Text style={[s.revLabel, { color: colors.mutedForeground }]}>Total cumulé</Text>
+                  <Text style={[s.revLabel, { color: colors.mutedForeground }]}>Total</Text>
                 </View>
               </View>
-              {stats.revenu_mensuel && stats.revenu_mensuel.length > 0 && (
+              {stats.revenu_mensuel?.length > 0 && (
                 <View style={{ marginTop: 10, gap: 4 }}>
                   <Text style={[s.sub, { color: colors.mutedForeground, fontWeight: "600" }]}>6 derniers mois</Text>
                   {stats.revenu_mensuel.map((rm: any) => (
                     <View key={rm.mois} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                       <Text style={[s.sub, { color: colors.mutedForeground, width: 60 }]}>{rm.mois}</Text>
                       <View style={{ flex: 1, height: 8, backgroundColor: colors.background, borderRadius: 4, overflow: "hidden" }}>
-                        <View style={{
-                          height: 8, borderRadius: 4, backgroundColor: colors.primary,
-                          width: `${Math.min(100, (rm.total / (Math.max(...stats.revenu_mensuel.map((x: any) => x.total)) || 1)) * 100)}%`,
-                        }} />
+                        <View style={{ height: 8, borderRadius: 4, backgroundColor: colors.primary, width: `${Math.min(100, (rm.total / (Math.max(...stats.revenu_mensuel.map((x: any) => x.total)) || 1)) * 100)}%` }} />
                       </View>
-                      <Text style={[s.sub, { color: colors.foreground, fontWeight: "700", width: 80, textAlign: "right" }]}>
-                        {Number(rm.total).toLocaleString()} DA
-                      </Text>
+                      <Text style={[s.sub, { color: colors.foreground, fontWeight: "700", width: 80, textAlign: "right" }]}>{Number(rm.total).toLocaleString()} DA</Text>
                     </View>
                   ))}
                 </View>
               )}
             </View>
-
-            <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
-              <Text style={[s.sectionTitle, { color: colors.foreground }]}>Sauvegarde & Restauration</Text>
-              <Text style={[s.sub, { color: colors.mutedForeground }]}>
-                Sauvegardez l'état complet de la base de données (membres, coachs, paiements, abonnements).
-              </Text>
-              <EliteButton
-                title={backupLoading ? "Sauvegarde en cours..." : "Lancer une sauvegarde"}
-                onPress={handleBackup}
-                loading={backupLoading}
-                variant="secondary"
-              />
-              <View style={[s.infoBox, { backgroundColor: "#3b82f610", borderColor: "#3b82f630" }]}>
-                <Text style={[s.sub, { color: "#1d4ed8" }]}>
-                  ℹ️ La restauration s'effectue depuis l'interface de la base de données MySQL directement.
-                </Text>
-              </View>
-            </View>
+            <EliteButton title={backupLoading ? "Sauvegarde..." : "Lancer une sauvegarde"} onPress={handleBackup} loading={backupLoading} variant="secondary" />
           </>
         )}
 
-        {/* ── MEMBRES ── */}
+        {/* MEMBRES */}
         {tab === "membres" && (
           <>
-            <EliteButton title="+ Ajouter un membre" onPress={() => setShowAddMembre(true)} variant="primary" small />
-            {membres.length === 0 ? <Empty icon="users" text="Aucun membre" /> :
-              membres.map((m: any) => (
-                <View key={m.id_membre} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={s.cardRow}>
-                    <View style={[s.avatar, { backgroundColor: colors.primary + "20" }]}>
-                      <Text style={[s.avatarText, { color: colors.primary }]}>{m.prenom?.[0]}{m.nom?.[0]}</Text>
+            <EliteButton title="+ Ajouter un membre" onPress={() => { setNewForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" }); setShowAddMembre(true); }} variant="primary" small />
+            <SearchBar value={searchMembre} onChange={setSearchMembre} placeholder="Rechercher par nom, téléphone..." />
+            {filteredMembres.length === 0 ? <Empty icon="users" text="Aucun membre trouvé" /> :
+              filteredMembres.map((m: any) => {
+                const actif = m.statut === 1;
+                return (
+                  <View key={m.id_membre} style={[s.card, { backgroundColor: colors.card, borderColor: actif ? colors.border : "#ef444430", borderWidth: actif ? 1 : 1.5 }]}>
+                    <View style={s.cardRow}>
+                      <View style={[s.avatar, { backgroundColor: (actif ? colors.primary : "#ef4444") + "20" }]}>
+                        <Text style={[s.avatarText, { color: actif ? colors.primary : "#ef4444" }]}>{m.prenom?.[0]}{m.nom?.[0]}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text style={[s.title, { color: colors.foreground }]}>{m.prenom} {m.nom}</Text>
+                          {!actif && <View style={[s.statusBadge, { backgroundColor: "#ef444420" }]}><Text style={[s.statusText, { color: "#ef4444" }]}>Suspendu</Text></View>}
+                        </View>
+                        <Text style={[s.sub, { color: colors.mutedForeground }]}>{m.telephone || m.email || "—"}</Text>
+                        <Text style={[s.sub, { color: colors.mutedForeground }]}>#{m.id_membre} · {m.date_inscription?.slice(0,10)}</Text>
+                      </View>
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.title, { color: colors.foreground }]}>{m.prenom} {m.nom}</Text>
-                      <Text style={[s.sub, { color: colors.mutedForeground }]}>{m.telephone || m.email}</Text>
-                      <Text style={[s.sub, { color: colors.mutedForeground }]}>
-                        Membre #{m.id_membre} · Inscrit le {m.date_inscription?.slice(0, 10)}
-                      </Text>
+                    <View style={s.actionRow}>
+                      <TouchableOpacity onPress={() => openEditMembre(m)} style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
+                        <Feather name="edit-2" size={13} color={colors.primary} />
+                        <Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleSuspendre("membre", m)}
+                        style={[s.actionBtn, { backgroundColor: (actif ? "#f59e0b" : "#10b981") + "15", borderColor: actif ? "#f59e0b" : "#10b981" }]}>
+                        <Feather name={actif ? "user-x" : "user-check"} size={13} color={actif ? "#f59e0b" : "#10b981"} />
+                        <Text style={[s.actionText, { color: actif ? "#f59e0b" : "#10b981" }]}>{actif ? "Suspendre" : "Réactiver"}</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
-                  <View style={s.actionRow}>
-                    <TouchableOpacity onPress={() => openEditMembre(m)} style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
-                      <Feather name="edit-2" size={13} color={colors.primary} />
-                      <Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDelete("membre", m.id_membre, `${m.prenom} ${m.nom}`)} style={[s.actionBtn, { backgroundColor: "#ef444415", borderColor: "#ef4444" }]}>
-                      <Feather name="trash-2" size={13} color="#ef4444" />
-                      <Text style={[s.actionText, { color: "#ef4444" }]}>Supprimer</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
+                );
+              })
             }
           </>
         )}
 
-        {/* ── COACHS ── */}
+        {/* COACHS */}
         {tab === "coachs" && (
           <>
-            <EliteButton title="+ Ajouter un coach" onPress={() => setShowAddCoach(true)} variant="primary" small />
-            {coachs.length === 0 ? <Empty icon="activity" text="Aucun coach" /> :
-              coachs.map((c: any) => (
-                <View key={c.id_coach} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={s.cardRow}>
-                    <View style={[s.avatar, { backgroundColor: "#10b98120" }]}>
-                      <Text style={[s.avatarText, { color: "#10b981" }]}>{c.prenom?.[0]}{c.nom?.[0]}</Text>
+            <EliteButton title="+ Ajouter un coach" onPress={() => { setNewForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" }); setShowAddCoach(true); }} variant="primary" small />
+            <SearchBar value={searchCoach} onChange={setSearchCoach} placeholder="Rechercher par nom, spécialité..." />
+            {filteredCoachs.length === 0 ? <Empty icon="activity" text="Aucun coach trouvé" /> :
+              filteredCoachs.map((c: any) => {
+                const actif = c.statut === 1;
+                return (
+                  <View key={c.id_coach} style={[s.card, { backgroundColor: colors.card, borderColor: actif ? colors.border : "#ef444430", borderWidth: actif ? 1 : 1.5 }]}>
+                    <View style={s.cardRow}>
+                      <View style={[s.avatar, { backgroundColor: (actif ? "#10b981" : "#ef4444") + "20" }]}>
+                        <Text style={[s.avatarText, { color: actif ? "#10b981" : "#ef4444" }]}>{c.prenom?.[0]}{c.nom?.[0]}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text style={[s.title, { color: colors.foreground }]}>{c.prenom} {c.nom}</Text>
+                          {!actif && <View style={[s.statusBadge, { backgroundColor: "#ef444420" }]}><Text style={[s.statusText, { color: "#ef4444" }]}>Suspendu</Text></View>}
+                        </View>
+                        <Text style={[s.sub, { color: colors.primary }]}>{c.specialite}</Text>
+                        <Text style={[s.sub, { color: colors.mutedForeground }]}>#{c.id_coach} · {c.telephone || c.email || "—"}</Text>
+                      </View>
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.title, { color: colors.foreground }]}>{c.prenom} {c.nom}</Text>
-                      <Text style={[s.sub, { color: colors.primary }]}>{c.specialite}</Text>
-                      <Text style={[s.sub, { color: colors.mutedForeground }]}>Coach #{c.id_coach} · {c.telephone || c.email}</Text>
+                    <View style={s.actionRow}>
+                      <TouchableOpacity onPress={() => openEditCoach(c)} style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
+                        <Feather name="edit-2" size={13} color={colors.primary} />
+                        <Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleSuspendre("coach", c)}
+                        style={[s.actionBtn, { backgroundColor: (actif ? "#f59e0b" : "#10b981") + "15", borderColor: actif ? "#f59e0b" : "#10b981" }]}>
+                        <Feather name={actif ? "user-x" : "user-check"} size={13} color={actif ? "#f59e0b" : "#10b981"} />
+                        <Text style={[s.actionText, { color: actif ? "#f59e0b" : "#10b981" }]}>{actif ? "Suspendre" : "Réactiver"}</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
-                  <View style={s.actionRow}>
-                    <TouchableOpacity onPress={() => openEditCoach(c)} style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
-                      <Feather name="edit-2" size={13} color={colors.primary} />
-                      <Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDelete("coach", c.id_coach, `${c.prenom} ${c.nom}`)} style={[s.actionBtn, { backgroundColor: "#ef444415", borderColor: "#ef4444" }]}>
-                      <Feather name="trash-2" size={13} color="#ef4444" />
-                      <Text style={[s.actionText, { color: "#ef4444" }]}>Retirer</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
+                );
+              })
             }
           </>
         )}
 
-        {/* ── PLANNING ── */}
+        {/* PLANNING CALENDRIER */}
         {tab === "planning" && (
           <>
-            {coursEnAttente.length === 0 ? (
-              <Empty icon="check-circle" text="Aucun cours en attente d'approbation" />
-            ) : coursEnAttente.map((c: any) => (
-              <View key={c.id_cours} style={[s.card, { backgroundColor: colors.card, borderColor: "#f59e0b40", borderWidth: 1.5 }]}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                  <View style={{ flex: 1 }}>
+            {coursEnAttente.length > 0 && (
+              <View style={[s.card, { backgroundColor: "#f59e0b08", borderColor: "#f59e0b40", borderWidth: 1.5 }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <Feather name="clock" size={15} color="#f59e0b" />
+                  <Text style={[s.sectionTitle, { color: "#b45309", marginBottom: 0 }]}>{coursEnAttente.length} cours en attente</Text>
+                </View>
+                {coursEnAttente.map((c: any) => (
+                  <View key={c.id_cours} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                     <Text style={[s.title, { color: colors.foreground }]}>{c.type_cours}</Text>
-                    <Text style={[s.sub, { color: colors.primary, fontWeight: "600" }]}>Coach : {c.prenom} {c.nom}</Text>
-                    <Text style={[s.sub, { color: colors.mutedForeground }]}>📅 {c.date_cours?.slice(0,10)} à {c.heure_debut?.slice(0,5)} · {c.duree_minutes} min</Text>
-                    <Text style={[s.sub, { color: colors.mutedForeground }]}>🏠 {c.salle} · {c.capacite_max} places</Text>
+                    <Text style={[s.sub, { color: colors.primary }]}>Coach : {c.prenom} {c.nom}</Text>
+                    <Text style={[s.sub, { color: colors.mutedForeground }]}>📅 {c.date_cours?.slice(0,10)} · {c.heure_debut?.slice(0,5)} · {c.duree_minutes} min · {c.salle}</Text>
+                    <View style={s.actionRow}>
+                      <TouchableOpacity onPress={() => handleRejeter(c.id_cours)} style={[s.actionBtn, { backgroundColor: "#ef444420", borderColor: "#ef4444" }]}>
+                        <Feather name="x" size={13} color="#ef4444" /><Text style={[s.actionText, { color: "#ef4444" }]}>Rejeter</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleApprouver(c.id_cours)} style={[s.actionBtn, { backgroundColor: "#10b98120", borderColor: "#10b981", flex: 2 }]}>
+                        <Feather name="check" size={13} color="#10b981" /><Text style={[s.actionText, { color: "#10b981" }]}>Approuver</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <View style={[s.statusBadge, { backgroundColor: "#f59e0b20" }]}>
-                    <Text style={[s.statusText, { color: "#f59e0b" }]}>En attente</Text>
-                  </View>
-                </View>
-                <View style={s.actionRow}>
-                  <TouchableOpacity onPress={() => handleRejeter(c.id_cours)} style={[s.actionBtn, { backgroundColor: "#ef444420", borderColor: "#ef4444" }]}>
-                    <Feather name="x" size={13} color="#ef4444" />
-                    <Text style={[s.actionText, { color: "#ef4444" }]}>Rejeter</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleApprouver(c.id_cours)} style={[s.actionBtn, { backgroundColor: "#10b98120", borderColor: "#10b981", flex: 2 }]}>
-                    <Feather name="check" size={13} color="#10b981" />
-                    <Text style={[s.actionText, { color: "#10b981" }]}>Approuver & Publier</Text>
-                  </TouchableOpacity>
-                </View>
+                ))}
               </View>
-            ))}
+            )}
+
+            <EliteButton title="+ Créer un cours pour un coach" onPress={() => setShowAddCours(true)} variant="primary" small />
+
+            {/* Calendrier */}
+            <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <TouchableOpacity onPress={() => setCalendarDate(new Date(calYear, calMonth - 1, 1))} style={{ padding: 8 }}>
+                  <Feather name="chevron-left" size={18} color={colors.primary} />
+                </TouchableOpacity>
+                <Text style={[s.sectionTitle, { color: colors.foreground, marginBottom: 0 }]}>{MOIS_FR[calMonth]} {calYear}</Text>
+                <TouchableOpacity onPress={() => setCalendarDate(new Date(calYear, calMonth + 1, 1))} style={{ padding: 8 }}>
+                  <Feather name="chevron-right" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+              <View style={{ flexDirection: "row", marginTop: 8 }}>
+                {JOURS_FR.map((j) => (
+                  <View key={j} style={{ flex: 1, alignItems: "center" }}>
+                    <Text style={{ color: colors.mutedForeground, fontSize: 10, fontWeight: "700" }}>{j}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 4 }}>
+                {Array.from({ length: firstDay }).map((_, i) => (
+                  <View key={`e${i}`} style={s.calCell} />
+                ))}
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                  const day = i + 1;
+                  const today = new Date();
+                  const isToday = today.getDate() === day && today.getMonth() === calMonth && today.getFullYear() === calYear;
+                  const dayEvents = coursForDay(day);
+                  return (
+                    <View key={day} style={[s.calCell, isToday && { backgroundColor: colors.primary + "15", borderRadius: 6, borderWidth: 1, borderColor: colors.primary }]}>
+                      <Text style={{ fontSize: 11, textAlign: "center", fontWeight: isToday ? "800" : "400", color: isToday ? colors.primary : colors.foreground }}>{day}</Text>
+                      {dayEvents.slice(0, 2).map((e: any, idx: number) => (
+                        <View key={idx} style={[s.calEvent, { backgroundColor: e.statut === "publie" ? colors.primary : "#f59e0b" }]}>
+                          <Text numberOfLines={1} style={{ color: "#fff", fontSize: 8, fontWeight: "700" }}>{e.type_cours}</Text>
+                        </View>
+                      ))}
+                      {dayEvents.length > 2 && <Text style={{ fontSize: 8, color: colors.mutedForeground, textAlign: "center" }}>+{dayEvents.length - 2}</Text>}
+                    </View>
+                  );
+                })}
+              </View>
+              <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
+                {[{ color: colors.primary, label: "Publié" }, { color: "#f59e0b", label: "En attente" }].map(l => (
+                  <View key={l.label} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: l.color }} />
+                    <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{l.label}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {coursMonth.length > 0 && (
+              <>
+                <Text style={[s.sectionTitle, { color: colors.foreground }]}>Cours de {MOIS_FR[calMonth]} ({coursMonth.length})</Text>
+                {[...coursMonth].sort((a, b) => a.date_cours.localeCompare(b.date_cours)).map((c: any) => (
+                  <View key={c.id_cours} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[s.title, { color: colors.foreground }]}>{c.type_cours}</Text>
+                        <Text style={[s.sub, { color: colors.primary }]}>Coach : {c.prenom} {c.nom}</Text>
+                        <Text style={[s.sub, { color: colors.mutedForeground }]}>📅 {c.date_cours?.slice(0,10)} · {c.heure_debut?.slice(0,5)} · {c.duree_minutes} min</Text>
+                        <Text style={[s.sub, { color: colors.mutedForeground }]}>🏠 {c.salle} · {c.places_restantes}/{c.capacite_max} places</Text>
+                      </View>
+                      <View style={[s.statusBadge, { backgroundColor: (STATUT_COLORS[c.statut] || "#6b7280") + "20" }]}>
+                        <Text style={[s.statusText, { color: STATUT_COLORS[c.statut] || "#6b7280" }]}>{c.statut}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </>
+            )}
           </>
         )}
 
-        {/* ── PAIEMENTS ── */}
+        {/* PAIEMENTS */}
         {tab === "paiements" && (
           <>
             <EliteButton title="+ Enregistrer un paiement" onPress={() => setShowAddPaiement(true)} variant="primary" small />
-            {paiements.length === 0 ? <Empty icon="credit-card" text="Aucun paiement enregistré" /> :
+            {paiements.length === 0 ? <Empty icon="credit-card" text="Aucun paiement" /> :
               paiements.map((p: any) => (
                 <View key={p.id_paiement} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <View style={s.cardRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={[s.title, { color: colors.foreground }]}>{p.prenom} {p.nom}</Text>
                       <Text style={[s.sub, { color: colors.mutedForeground }]}>{p.motif}{p.formule_nom ? ` · ${p.formule_nom}` : ""}</Text>
-                      <Text style={[s.sub, { color: colors.mutedForeground }]}>
-                        {new Date(p.date_heure).toLocaleDateString("fr-FR")} · {p.mode_paiement}
-                      </Text>
+                      <Text style={[s.sub, { color: colors.mutedForeground }]}>{new Date(p.date_heure).toLocaleDateString("fr-FR")} · {p.mode_paiement}</Text>
                     </View>
-                    <View style={{ alignItems: "flex-end", gap: 4 }}>
-                      <Text style={[s.montant, { color: p.statut === "valide" ? "#10b981" : "#ef4444" }]}>
-                        {Number(p.montant).toLocaleString()} DA
-                      </Text>
-                      <View style={[s.statusBadge, { backgroundColor: p.statut === "valide" ? "#10b98120" : "#ef444420" }]}>
-                        <Text style={[s.statusText, { color: p.statut === "valide" ? "#10b981" : "#ef4444" }]}>{p.statut}</Text>
-                      </View>
+                    <View style={{ alignItems: "flex-end", gap: 6 }}>
+                      <Text style={[s.montant, { color: "#10b981" }]}>{Number(p.montant).toLocaleString()} DA</Text>
+                      <TouchableOpacity onPress={() => handleExportPdf(p)} style={[s.actionBtn, { backgroundColor: "#3b82f615", borderColor: "#3b82f6", paddingHorizontal: 10 }]}>
+                        <Feather name="file-text" size={12} color="#3b82f6" />
+                        <Text style={[s.actionText, { color: "#3b82f6" }]}>PDF</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </View>
@@ -593,146 +754,123 @@ export default function AdminDashboard() {
           </>
         )}
 
-        {/* ── ABONNEMENTS ── */}
+        {/* ABONNEMENTS */}
         {tab === "abonnements" && (
           <>
             <View style={s.rowGap}>
-              <View style={{ flex: 1 }}>
-                <EliteButton title="+ Affecter abo" onPress={() => setShowAffecterAbo(true)} variant="primary" small />
-              </View>
-              <View style={{ flex: 1 }}>
-                <EliteButton title="+ Formule" onPress={() => { setEditFormule(null); setFormulForm({ nom: "", description: "", tarif: "", duree_jours: "" }); setShowAddFormule(true); }} variant="secondary" small />
-              </View>
+              <View style={{ flex: 1 }}><EliteButton title="+ Affecter abo" onPress={() => setShowAffecterAbo(true)} variant="primary" small /></View>
+              <View style={{ flex: 1 }}><EliteButton title="+ Formule" onPress={() => { setEditFormule(null); setFormulForm({ nom: "", description: "", tarif: "", duree_jours: "" }); setShowAddFormule(true); }} variant="secondary" small /></View>
             </View>
-
             <Text style={[s.sectionTitle, { color: colors.foreground, marginTop: 4 }]}>Formules d'abonnement</Text>
-            {formules.length === 0 ? <Empty icon="tag" text="Aucune formule définie" /> :
-              formules.map((f: any) => (
-                <View key={f.id_formule} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={s.cardRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[s.title, { color: colors.foreground }]}>{f.nom}</Text>
-                      {f.description ? <Text style={[s.sub, { color: colors.mutedForeground }]}>{f.description}</Text> : null}
-                      <Text style={[s.sub, { color: colors.primary, fontWeight: "700" }]}>
-                        {Number(f.tarif).toLocaleString()} DA · {f.duree_jours} jours
-                      </Text>
-                    </View>
-                    <View style={[s.statusBadge, { backgroundColor: f.actif ? "#10b98120" : "#ef444420" }]}>
-                      <Text style={[s.statusText, { color: f.actif ? "#10b981" : "#ef4444" }]}>{f.actif ? "Active" : "Inactive"}</Text>
-                    </View>
+            {formules.map((f: any) => (
+              <View key={f.id_formule} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={s.cardRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.title, { color: colors.foreground }]}>{f.nom}</Text>
+                    {f.description ? <Text style={[s.sub, { color: colors.mutedForeground }]}>{f.description}</Text> : null}
+                    <Text style={[s.sub, { color: colors.primary, fontWeight: "700" }]}>{Number(f.tarif).toLocaleString()} DA · {f.duree_jours} jours</Text>
                   </View>
-                  <View style={s.actionRow}>
-                    <TouchableOpacity onPress={() => { setEditFormule(f); setFormulForm({ nom: f.nom, description: f.description || "", tarif: String(f.tarif), duree_jours: String(f.duree_jours) }); setShowAddFormule(true); }}
-                      style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
-                      <Feather name="edit-2" size={13} color={colors.primary} />
-                      <Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDeleteFormule(f)}
-                      style={[s.actionBtn, { backgroundColor: "#ef444415", borderColor: "#ef4444" }]}>
-                      <Feather name="trash-2" size={13} color="#ef4444" />
-                      <Text style={[s.actionText, { color: "#ef4444" }]}>Désactiver</Text>
-                    </TouchableOpacity>
+                  <View style={[s.statusBadge, { backgroundColor: (f.actif ? "#10b981" : "#ef4444") + "20" }]}>
+                    <Text style={[s.statusText, { color: f.actif ? "#10b981" : "#ef4444" }]}>{f.actif ? "Active" : "Inactive"}</Text>
                   </View>
                 </View>
-              ))
-            }
-
-            <Text style={[s.sectionTitle, { color: colors.foreground, marginTop: 8 }]}>Abonnements membres ({abonnements.length})</Text>
-            {abonnements.length === 0 ? <Empty icon="tag" text="Aucun abonnement affecté" /> :
-              abonnements.slice(0, 30).map((a: any) => {
-                const expire = new Date(a.date_fin) < new Date();
-                return (
-                  <View key={a.id_abonnement} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <View style={s.cardRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[s.title, { color: colors.foreground }]}>{a.prenom} {a.nom}</Text>
-                        <Text style={[s.sub, { color: colors.primary }]}>{a.formule_nom} · {Number(a.tarif).toLocaleString()} DA</Text>
-                        <Text style={[s.sub, { color: colors.mutedForeground }]}>
-                          Du {a.date_debut?.slice(0,10)} au {a.date_fin?.slice(0,10)}
-                        </Text>
-                      </View>
-                      <View style={[s.statusBadge, { backgroundColor: expire ? "#ef444420" : "#10b98120" }]}>
-                        <Text style={[s.statusText, { color: expire ? "#ef4444" : "#10b981" }]}>{expire ? "Expiré" : "Actif"}</Text>
-                      </View>
+                <View style={s.actionRow}>
+                  <TouchableOpacity onPress={() => { setEditFormule(f); setFormulForm({ nom: f.nom, description: f.description || "", tarif: String(f.tarif), duree_jours: String(f.duree_jours) }); setShowAddFormule(true); }}
+                    style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
+                    <Feather name="edit-2" size={13} color={colors.primary} /><Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleToggleFormule(f)}
+                    style={[s.actionBtn, { backgroundColor: (f.actif ? "#f59e0b" : "#10b981") + "15", borderColor: f.actif ? "#f59e0b" : "#10b981" }]}>
+                    <Feather name={f.actif ? "toggle-right" : "toggle-left"} size={13} color={f.actif ? "#f59e0b" : "#10b981"} />
+                    <Text style={[s.actionText, { color: f.actif ? "#f59e0b" : "#10b981" }]}>{f.actif ? "Désactiver" : "Activer"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+            <Text style={[s.sectionTitle, { color: colors.foreground, marginTop: 8 }]}>Abonnements membres</Text>
+            <SearchBar value={searchAbo} onChange={setSearchAbo} placeholder="Rechercher membre ou formule..." />
+            {filteredAbonnements.slice(0,50).map((a: any) => {
+              const expire = new Date(a.date_fin) < new Date();
+              const resilié = a.statut === "resilié";
+              const statusColor = resilié ? "#6b7280" : expire ? "#ef4444" : "#10b981";
+              return (
+                <View key={a.id_abonnement} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <View style={s.cardRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.title, { color: colors.foreground }]}>{a.prenom} {a.nom}</Text>
+                      <Text style={[s.sub, { color: colors.primary }]}>{a.formule_nom} · {Number(a.tarif).toLocaleString()} DA</Text>
+                      <Text style={[s.sub, { color: colors.mutedForeground }]}>{a.date_debut?.slice(0,10)} → {a.date_fin?.slice(0,10)}</Text>
+                    </View>
+                    <View style={[s.statusBadge, { backgroundColor: statusColor + "20" }]}>
+                      <Text style={[s.statusText, { color: statusColor }]}>{resilié ? "Résilié" : expire ? "Expiré" : "Actif"}</Text>
                     </View>
                   </View>
-                );
-              })
-            }
+                  {!resilié && (
+                    <TouchableOpacity onPress={() => handleResilierAbo(a)}
+                      style={[s.actionBtn, { backgroundColor: "#ef444415", borderColor: "#ef4444", alignSelf: "flex-end" }]}>
+                      <Feather name="x-circle" size={13} color="#ef4444" /><Text style={[s.actionText, { color: "#ef4444" }]}>Résilier</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })}
           </>
         )}
 
-        {/* ── ÉQUIPEMENTS ── */}
+        {/* ÉQUIPEMENTS */}
         {tab === "equipements" && (
           <>
             <EliteButton title="+ Ajouter un équipement" onPress={() => { setEditEquipement(null); setEquipForm({ nom: "", categorie: "Musculation", etat: "bon", quantite: "1", notes: "" }); setShowAddEquipement(true); }} variant="primary" small />
-            {equipements.length === 0 ? <Empty icon="tool" text="Aucun équipement enregistré" /> :
-              equipements.map((eq: any) => {
-                const etatInfo = ETAT_INFO[eq.etat] || { label: eq.etat, color: "#6b7280" };
-                return (
-                  <View key={eq.id_equipement} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <View style={s.cardRow}>
-                      <View style={[s.avatar, { backgroundColor: etatInfo.color + "20" }]}>
-                        <Feather name="tool" size={18} color={etatInfo.color} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[s.title, { color: colors.foreground }]}>{eq.nom}</Text>
-                        <Text style={[s.sub, { color: colors.mutedForeground }]}>{eq.categorie} · Qté : {eq.quantite}</Text>
-                        {eq.notes ? <Text style={[s.sub, { color: colors.mutedForeground }]}>{eq.notes}</Text> : null}
-                      </View>
-                      <View style={[s.statusBadge, { backgroundColor: etatInfo.color + "20" }]}>
-                        <Text style={[s.statusText, { color: etatInfo.color }]}>{etatInfo.label}</Text>
-                      </View>
+            {equipements.map((eq: any) => {
+              const info = ETAT_INFO[eq.etat] || { label: eq.etat, color: "#6b7280" };
+              return (
+                <View key={eq.id_equipement} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <View style={s.cardRow}>
+                    <View style={[s.avatar, { backgroundColor: info.color + "20" }]}><Feather name="tool" size={18} color={info.color} /></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.title, { color: colors.foreground }]}>{eq.nom}</Text>
+                      <Text style={[s.sub, { color: colors.mutedForeground }]}>{eq.categorie} · Qté : {eq.quantite}</Text>
                     </View>
-                    <View style={s.actionRow}>
-                      <TouchableOpacity onPress={() => { setEditEquipement(eq); setEquipForm({ nom: eq.nom, categorie: eq.categorie, etat: eq.etat, quantite: String(eq.quantite), notes: eq.notes || "" }); setShowAddEquipement(true); }}
-                        style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
-                        <Feather name="edit-2" size={13} color={colors.primary} />
-                        <Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDeleteEquipement(eq)}
-                        style={[s.actionBtn, { backgroundColor: "#ef444415", borderColor: "#ef4444" }]}>
-                        <Feather name="trash-2" size={13} color="#ef4444" />
-                        <Text style={[s.actionText, { color: "#ef4444" }]}>Supprimer</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <View style={[s.statusBadge, { backgroundColor: info.color + "20" }]}><Text style={[s.statusText, { color: info.color }]}>{info.label}</Text></View>
                   </View>
-                );
-              })
-            }
+                  <View style={s.actionRow}>
+                    <TouchableOpacity onPress={() => { setEditEquipement(eq); setEquipForm({ nom: eq.nom, categorie: eq.categorie, etat: eq.etat, quantite: String(eq.quantite), notes: eq.notes || "" }); setShowAddEquipement(true); }}
+                      style={[s.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
+                      <Feather name="edit-2" size={13} color={colors.primary} /><Text style={[s.actionText, { color: colors.primary }]}>Modifier</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeleteEquipement(eq)} style={[s.actionBtn, { backgroundColor: "#ef444415", borderColor: "#ef4444" }]}>
+                      <Feather name="trash-2" size={13} color="#ef4444" /><Text style={[s.actionText, { color: "#ef4444" }]}>Supprimer</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
           </>
         )}
 
-        {/* ── AUDIT ── */}
+        {/* AUDIT */}
         {tab === "audit" && (
           <>
-            <Text style={[s.sectionTitle, { color: colors.foreground }]}>Journal d'audit ({audit.length} entrées)</Text>
-            {audit.length === 0 ? <Empty icon="file-text" text="Aucune entrée d'audit" /> :
-              audit.map((a: any) => (
-                <View key={a.id_journal} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <Text style={[s.title, { color: colors.foreground }]}>{a.action}</Text>
-                  <Text style={[s.sub, { color: colors.mutedForeground }]}>
-                    {a.prenom} {a.nom} · {new Date(a.date_action).toLocaleString("fr-FR")}
-                  </Text>
-                  {a.table_affectee && (
-                    <Text style={[s.sub, { color: colors.primary }]}>Table : {a.table_affectee}</Text>
-                  )}
-                </View>
-              ))
-            }
+            <Text style={[s.sectionTitle, { color: colors.foreground }]}>Journal ({audit.length})</Text>
+            {audit.map((a: any) => (
+              <View key={a.id_journal} style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[s.title, { color: colors.foreground }]}>{a.action}</Text>
+                <Text style={[s.sub, { color: colors.mutedForeground }]}>{a.prenom} {a.nom} · {new Date(a.date_action).toLocaleString("fr-FR")}</Text>
+                {a.table_affectee && <Text style={[s.sub, { color: colors.primary }]}>Table : {a.table_affectee}</Text>}
+              </View>
+            ))}
           </>
         )}
 
-        {/* ── PARAMÈTRES ── */}
+        {/* PARAMÈTRES */}
         {tab === "parametres" && (
           <>
             <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[s.sectionTitle, { color: colors.foreground }]}>Informations du compte</Text>
+              <Text style={[s.sectionTitle, { color: colors.foreground }]}>Compte</Text>
               {[
                 { icon: "user",   label: "Nom complet", value: `${user?.prenom} ${user?.nom}` },
-                { icon: "shield", label: "Rôle",         value: user?.role },
-                { icon: "mail",   label: "Email",         value: user?.email || "—" },
-                { icon: "phone",  label: "Téléphone",     value: user?.telephone || "—" },
+                { icon: "mail",   label: "Email",        value: user?.email || "—" },
+                { icon: "phone",  label: "Téléphone",    value: user?.telephone || "—" },
               ].map((item) => (
                 <View key={item.label} style={[s.infoRow, { borderColor: colors.border }]}>
                   <Feather name={item.icon as any} size={15} color={colors.primary} />
@@ -745,19 +883,17 @@ export default function AdminDashboard() {
             </View>
             <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
               <Text style={[s.sectionTitle, { color: colors.foreground }]}>Changer le mot de passe</Text>
-              <EliteInput label="Ancien mot de passe" secureTextEntry value={ancienMdp} onChangeText={setAncienMdp} placeholder="••••••••" />
-              <EliteInput label="Nouveau mot de passe" secureTextEntry value={nouveauMdp} onChangeText={setNouveauMdp} placeholder="Min. 6 caractères" />
+              <EliteInput label="Ancien" secureTextEntry value={ancienMdp} onChangeText={setAncienMdp} placeholder="••••••••" />
+              <EliteInput label="Nouveau" secureTextEntry value={nouveauMdp} onChangeText={setNouveauMdp} placeholder="Min. 6 caractères" />
               <EliteButton title="Mettre à jour" onPress={handleChangeMdp} loading={loadingParam} variant="secondary" small />
             </View>
             <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
               <Text style={[s.sectionTitle, { color: colors.foreground }]}>Changer le numéro</Text>
-              <Text style={[s.sub, { color: colors.mutedForeground }]}>Actuel : {user?.telephone || "—"}</Text>
               <EliteInput label="Nouveau numéro" value={nouveauTel} onChangeText={setNouveauTel} placeholder="+213..." keyboardType="phone-pad" />
               <EliteButton title="Mettre à jour" onPress={handleChangeTel} loading={loadingParam} variant="secondary" small />
             </View>
             <View style={[s.card, { backgroundColor: colors.card, borderColor: colors.border, gap: 10 }]}>
               <Text style={[s.sectionTitle, { color: colors.foreground }]}>Changer l'email</Text>
-              <Text style={[s.sub, { color: colors.mutedForeground }]}>Actuel : {user?.email || "—"}</Text>
               <EliteInput label="Nouvel email" value={nouvelEmail} onChangeText={setNouvelEmail} placeholder="admin@elitegym.dz" keyboardType="email-address" autoCapitalize="none" />
               <EliteButton title="Mettre à jour" onPress={handleChangeEmail} loading={loadingParam} variant="secondary" small />
             </View>
@@ -766,195 +902,238 @@ export default function AdminDashboard() {
         )}
       </ScrollView>
 
-      {/* ── Modal : Ajouter membre ── */}
+      {/* Modal Notifications */}
+      <Modal visible={showNotifs} animationType="slide" transparent onRequestClose={() => setShowNotifs(false)}>
+        <View style={s.overlay}>
+          <View style={[s.sheet, { backgroundColor: colors.card, maxHeight: "80%" }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={[s.modalTitle, { color: colors.foreground }]}>Notifications</Text>
+              <TouchableOpacity onPress={() => setShowNotifs(false)}><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
+            </View>
+            <ScrollView>
+              {notifications.length === 0 ? (
+                <Text style={[s.sub, { color: colors.mutedForeground, textAlign: "center", paddingVertical: 20 }]}>Aucune notification</Text>
+              ) : notifications.map((n: any) => (
+                <View key={n.id_notif} style={[s.card, { backgroundColor: n.lu ? colors.background : colors.primary + "10", borderColor: n.lu ? colors.border : colors.primary + "40" }]}>
+                  <Text style={[s.title, { color: colors.foreground, fontSize: 13 }]}>{n.titre}</Text>
+                  {n.message && <Text style={[s.sub, { color: colors.mutedForeground }]}>{n.message}</Text>}
+                  <Text style={[s.sub, { color: colors.mutedForeground }]}>{new Date(n.date_creation).toLocaleString("fr-FR")}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Ajouter membre */}
       <Modal visible={showAddMembre} animationType="slide" transparent onRequestClose={() => setShowAddMembre(false)}>
-        <View style={s.overlay}>
-          <ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-            <Text style={[s.modalTitle, { color: colors.foreground }]}>Nouveau membre</Text>
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteInput label="Nom" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} /></View>
-              <View style={{ flex: 1 }}><EliteInput label="Prénom" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} /></View>
-            </View>
-            <EliteInput label="Téléphone (optionnel)" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} keyboardType="phone-pad" placeholder="+213..." />
-            <EliteInput label="Email (optionnel)" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
-            <View style={[s.infoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
-              <Text style={[s.sub, { color: colors.primary }]}>Mot de passe par défaut : <Text style={{ fontWeight: "900" }}>elitegym2026</Text></Text>
-            </View>
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddMembre(false)} variant="outline" /></View>
-              <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterMembre} loading={loading} /></View>
-            </View>
-          </View></ScrollView>
-        </View>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>Nouveau membre</Text>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteInput label="Nom *" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} /></View>
+            <View style={{ flex: 1 }}><EliteInput label="Prénom *" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} /></View>
+          </View>
+          <EliteInput label="Téléphone (optionnel)" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} keyboardType="phone-pad" placeholder="+213..." />
+          <EliteInput label="Email (optionnel)" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
+          <View style={[s.infoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
+            <Text style={[s.sub, { color: colors.primary }]}>Mdp par défaut : <Text style={{ fontWeight: "900" }}>elitegym2026</Text></Text>
+          </View>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddMembre(false)} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterMembre} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
       </Modal>
 
-      {/* ── Modal : Ajouter coach ── */}
+      {/* Modal Ajouter coach */}
       <Modal visible={showAddCoach} animationType="slide" transparent onRequestClose={() => setShowAddCoach(false)}>
-        <View style={s.overlay}>
-          <ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-            <Text style={[s.modalTitle, { color: colors.foreground }]}>Nouveau coach</Text>
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteInput label="Nom" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} /></View>
-              <View style={{ flex: 1 }}><EliteInput label="Prénom" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} /></View>
-            </View>
-            <EliteInput label="Téléphone (optionnel)" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} keyboardType="phone-pad" placeholder="+213..." />
-            <EliteInput label="Email (optionnel)" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
-            <EliteInput label="Spécialité" value={newForm.specialite} onChangeText={(v) => setNewForm({ ...newForm, specialite: v })} placeholder="ex: Musculation & Force" />
-            <View style={[s.infoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
-              <Text style={[s.sub, { color: colors.primary }]}>Mot de passe par défaut : <Text style={{ fontWeight: "900" }}>elitegym2026</Text></Text>
-            </View>
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddCoach(false)} variant="outline" /></View>
-              <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterCoach} loading={loading} /></View>
-            </View>
-          </View></ScrollView>
-        </View>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>Nouveau coach</Text>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteInput label="Nom *" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} /></View>
+            <View style={{ flex: 1 }}><EliteInput label="Prénom *" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} /></View>
+          </View>
+          <EliteInput label="Téléphone (optionnel)" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} keyboardType="phone-pad" placeholder="+213..." />
+          <EliteInput label="Email (optionnel)" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
+          <EliteInput label="Spécialité *" value={newForm.specialite} onChangeText={(v) => setNewForm({ ...newForm, specialite: v })} placeholder="ex: Musculation & Force" />
+          <View style={[s.infoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
+            <Text style={[s.sub, { color: colors.primary }]}>Mdp par défaut : <Text style={{ fontWeight: "900" }}>elitegym2026</Text></Text>
+          </View>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddCoach(false)} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterCoach} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
       </Modal>
 
-      {/* ── Modal : Éditer membre/coach ── */}
+      {/* Modal Editer */}
       <Modal visible={!!editTarget} animationType="slide" transparent onRequestClose={() => setEditTarget(null)}>
-        <View style={s.overlay}>
-          <ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-            <Text style={[s.modalTitle, { color: colors.foreground }]}>
-              Modifier {editTarget?.type === "membre" ? "le membre" : "le coach"}
-            </Text>
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteInput label="Nom" value={editForm.nom} onChangeText={(v) => setEditForm({ ...editForm, nom: v })} /></View>
-              <View style={{ flex: 1 }}><EliteInput label="Prénom" value={editForm.prenom} onChangeText={(v) => setEditForm({ ...editForm, prenom: v })} /></View>
-            </View>
-            <EliteInput label="Téléphone" value={editForm.telephone} onChangeText={(v) => setEditForm({ ...editForm, telephone: v })} keyboardType="phone-pad" />
-            <EliteInput label="Email" value={editForm.email} onChangeText={(v) => setEditForm({ ...editForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
-            {editTarget?.type === "coach" && (
-              <EliteInput label="Spécialité" value={editForm.specialite} onChangeText={(v) => setEditForm({ ...editForm, specialite: v })} />
-            )}
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setEditTarget(null)} variant="outline" /></View>
-              <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleSaveEdit} loading={loading} /></View>
-            </View>
-          </View></ScrollView>
-        </View>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>Modifier {editTarget?.type === "membre" ? "le membre" : "le coach"}</Text>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteInput label="Nom" value={editForm.nom} onChangeText={(v) => setEditForm({ ...editForm, nom: v })} /></View>
+            <View style={{ flex: 1 }}><EliteInput label="Prénom" value={editForm.prenom} onChangeText={(v) => setEditForm({ ...editForm, prenom: v })} /></View>
+          </View>
+          <EliteInput label="Téléphone" value={editForm.telephone} onChangeText={(v) => setEditForm({ ...editForm, telephone: v })} keyboardType="phone-pad" />
+          <EliteInput label="Email" value={editForm.email} onChangeText={(v) => setEditForm({ ...editForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
+          {editTarget?.type === "coach" && <EliteInput label="Spécialité" value={editForm.specialite} onChangeText={(v) => setEditForm({ ...editForm, specialite: v })} />}
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setEditTarget(null)} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleSaveEdit} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
       </Modal>
 
-      {/* ── Modal : Enregistrer paiement ── */}
+      {/* Modal Paiement */}
       <Modal visible={showAddPaiement} animationType="slide" transparent onRequestClose={() => setShowAddPaiement(false)}>
-        <View style={s.overlay}>
-          <ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-            <Text style={[s.modalTitle, { color: colors.foreground }]}>Enregistrer un paiement</Text>
-            <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Membre</Text>
-            <ScrollView style={{ maxHeight: 160, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
-              {membres.map((m: any) => (
-                <TouchableOpacity key={m.id_membre} onPress={() => setPaiForm({ ...paiForm, id_membre: String(m.id_membre) })}
-                  style={[s.selectItem, { backgroundColor: paiForm.id_membre === String(m.id_membre) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
-                  <Text style={{ color: colors.foreground }}>{m.prenom} {m.nom}</Text>
-                  {paiForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <EliteInput label="Montant (DA)" value={paiForm.montant} onChangeText={(v) => setPaiForm({ ...paiForm, montant: v })} keyboardType="numeric" placeholder="ex: 3000" />
-            <EliteInput label="Motif" value={paiForm.motif} onChangeText={(v) => setPaiForm({ ...paiForm, motif: v })} placeholder="Abonnement, Inscription..." />
-            <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Mode de paiement</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-              {MODES_PAIEMENT.map((mode) => (
-                <TouchableOpacity key={mode} onPress={() => setPaiForm({ ...paiForm, mode_paiement: mode })}
-                  style={[s.modeBtn, { backgroundColor: paiForm.mode_paiement === mode ? colors.primary : colors.background, borderColor: paiForm.mode_paiement === mode ? colors.primary : colors.border }]}>
-                  <Text style={{ color: paiForm.mode_paiement === mode ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{mode}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddPaiement(false)} variant="outline" /></View>
-              <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleAddPaiement} loading={loading} /></View>
-            </View>
-          </View></ScrollView>
-        </View>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>Enregistrer un paiement</Text>
+          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Membre</Text>
+          <SearchBar value={searchMembre} onChange={setSearchMembre} placeholder="Rechercher..." />
+          <ScrollView style={{ maxHeight: 150, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
+            {filteredMembres.filter((m: any) => m.statut === 1).map((m: any) => (
+              <TouchableOpacity key={m.id_membre} onPress={() => setPaiForm({ ...paiForm, id_membre: String(m.id_membre) })}
+                style={[s.selectItem, { backgroundColor: paiForm.id_membre === String(m.id_membre) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
+                <Text style={{ color: colors.foreground }}>{m.prenom} {m.nom}</Text>
+                {paiForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <EliteInput label="Montant (DA)" value={paiForm.montant} onChangeText={(v) => setPaiForm({ ...paiForm, montant: v })} keyboardType="numeric" placeholder="ex: 3000" />
+          <EliteInput label="Motif" value={paiForm.motif} onChangeText={(v) => setPaiForm({ ...paiForm, motif: v })} />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            {MODES_PAIEMENT.map((mode) => (
+              <TouchableOpacity key={mode} onPress={() => setPaiForm({ ...paiForm, mode_paiement: mode })}
+                style={[s.modeBtn, { backgroundColor: paiForm.mode_paiement === mode ? colors.primary : colors.background, borderColor: paiForm.mode_paiement === mode ? colors.primary : colors.border }]}>
+                <Text style={{ color: paiForm.mode_paiement === mode ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{mode}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddPaiement(false)} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleAddPaiement} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
       </Modal>
 
-      {/* ── Modal : Formule ── */}
+      {/* Modal Formule */}
       <Modal visible={showAddFormule} animationType="slide" transparent onRequestClose={() => setShowAddFormule(false)}>
-        <View style={s.overlay}>
-          <ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-            <Text style={[s.modalTitle, { color: colors.foreground }]}>{editFormule ? "Modifier la formule" : "Nouvelle formule"}</Text>
-            <EliteInput label="Nom" value={formulForm.nom} onChangeText={(v) => setFormulForm({ ...formulForm, nom: v })} placeholder="ex: Mensuel Standard" />
-            <EliteInput label="Description (optionnel)" value={formulForm.description} onChangeText={(v) => setFormulForm({ ...formulForm, description: v })} />
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteInput label="Tarif (DA)" value={formulForm.tarif} onChangeText={(v) => setFormulForm({ ...formulForm, tarif: v })} keyboardType="numeric" /></View>
-              <View style={{ flex: 1 }}><EliteInput label="Durée (jours)" value={formulForm.duree_jours} onChangeText={(v) => setFormulForm({ ...formulForm, duree_jours: v })} keyboardType="numeric" /></View>
-            </View>
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddFormule(false); setEditFormule(null); }} variant="outline" /></View>
-              <View style={{ flex: 1 }}><EliteButton title={editFormule ? "Enregistrer" : "Créer"} onPress={handleSaveFormule} loading={loading} /></View>
-            </View>
-          </View></ScrollView>
-        </View>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>{editFormule ? "Modifier la formule" : "Nouvelle formule"}</Text>
+          <EliteInput label="Nom" value={formulForm.nom} onChangeText={(v) => setFormulForm({ ...formulForm, nom: v })} placeholder="ex: Mensuel Standard" />
+          <EliteInput label="Description (optionnel)" value={formulForm.description} onChangeText={(v) => setFormulForm({ ...formulForm, description: v })} />
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteInput label="Tarif (DA)" value={formulForm.tarif} onChangeText={(v) => setFormulForm({ ...formulForm, tarif: v })} keyboardType="numeric" /></View>
+            <View style={{ flex: 1 }}><EliteInput label="Durée (jours)" value={formulForm.duree_jours} onChangeText={(v) => setFormulForm({ ...formulForm, duree_jours: v })} keyboardType="numeric" /></View>
+          </View>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddFormule(false); setEditFormule(null); }} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title={editFormule ? "Enregistrer" : "Créer"} onPress={handleSaveFormule} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
       </Modal>
 
-      {/* ── Modal : Affecter abonnement ── */}
+      {/* Modal Affecter Abo */}
       <Modal visible={showAffecterAbo} animationType="slide" transparent onRequestClose={() => setShowAffecterAbo(false)}>
-        <View style={s.overlay}>
-          <ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-            <Text style={[s.modalTitle, { color: colors.foreground }]}>Affecter un abonnement</Text>
-            <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Membre</Text>
-            <ScrollView style={{ maxHeight: 150, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
-              {membres.map((m: any) => (
-                <TouchableOpacity key={m.id_membre} onPress={() => setAboForm({ ...aboForm, id_membre: String(m.id_membre) })}
-                  style={[s.selectItem, { backgroundColor: aboForm.id_membre === String(m.id_membre) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
-                  <Text style={{ color: colors.foreground }}>{m.prenom} {m.nom}</Text>
-                  {aboForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Formule</Text>
-            <ScrollView style={{ maxHeight: 150, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
-              {formules.filter((f: any) => f.actif).map((f: any) => (
-                <TouchableOpacity key={f.id_formule} onPress={() => setAboForm({ ...aboForm, id_formule: String(f.id_formule) })}
-                  style={[s.selectItem, { backgroundColor: aboForm.id_formule === String(f.id_formule) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
-                  <Text style={{ color: colors.foreground }}>{f.nom} · {Number(f.tarif).toLocaleString()} DA</Text>
-                  {aboForm.id_formule === String(f.id_formule) && <Feather name="check" size={14} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <EliteInput label="Date début" value={aboForm.date_debut} onChangeText={(v) => setAboForm({ ...aboForm, date_debut: v })} placeholder="YYYY-MM-DD" />
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAffecterAbo(false)} variant="outline" /></View>
-              <View style={{ flex: 1 }}><EliteButton title="Affecter" onPress={handleAffecterAbo} loading={loading} /></View>
-            </View>
-          </View></ScrollView>
-        </View>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>Affecter un abonnement</Text>
+          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Membre</Text>
+          <SearchBar value={searchMembre} onChange={setSearchMembre} placeholder="Rechercher..." />
+          <ScrollView style={{ maxHeight: 140, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
+            {filteredMembres.filter((m: any) => m.statut === 1).map((m: any) => (
+              <TouchableOpacity key={m.id_membre} onPress={() => setAboForm({ ...aboForm, id_membre: String(m.id_membre) })}
+                style={[s.selectItem, { backgroundColor: aboForm.id_membre === String(m.id_membre) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
+                <Text style={{ color: colors.foreground }}>{m.prenom} {m.nom}</Text>
+                {aboForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Formule</Text>
+          <ScrollView style={{ maxHeight: 140, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
+            {formules.filter((f: any) => f.actif).map((f: any) => (
+              <TouchableOpacity key={f.id_formule} onPress={() => setAboForm({ ...aboForm, id_formule: String(f.id_formule) })}
+                style={[s.selectItem, { backgroundColor: aboForm.id_formule === String(f.id_formule) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
+                <Text style={{ color: colors.foreground }}>{f.nom} · {Number(f.tarif).toLocaleString()} DA</Text>
+                {aboForm.id_formule === String(f.id_formule) && <Feather name="check" size={14} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <EliteInput label="Date début" value={aboForm.date_debut} onChangeText={(v) => setAboForm({ ...aboForm, date_debut: v })} placeholder="YYYY-MM-DD" />
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAffecterAbo(false)} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title="Affecter" onPress={handleAffecterAbo} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
       </Modal>
 
-      {/* ── Modal : Équipement ── */}
+      {/* Modal Créer cours (admin → coach) */}
+      <Modal visible={showAddCours} animationType="slide" transparent onRequestClose={() => setShowAddCours(false)}>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>Créer un cours</Text>
+          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Coach *</Text>
+          <ScrollView style={{ maxHeight: 130, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
+            {coachs.filter((c: any) => c.statut === 1).map((c: any) => (
+              <TouchableOpacity key={c.id_coach} onPress={() => setCoursForm({ ...coursForm, id_coach: String(c.id_coach) })}
+                style={[s.selectItem, { backgroundColor: coursForm.id_coach === String(c.id_coach) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
+                <Text style={{ color: colors.foreground }}>{c.prenom} {c.nom} — {c.specialite}</Text>
+                {coursForm.id_coach === String(c.id_coach) && <Feather name="check" size={14} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <EliteInput label="Type de cours *" value={coursForm.type_cours} onChangeText={(v) => setCoursForm({ ...coursForm, type_cours: v })} placeholder="ex: Body Pump" />
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteInput label="Date (YYYY-MM-DD) *" value={coursForm.date_cours} onChangeText={(v) => setCoursForm({ ...coursForm, date_cours: v })} placeholder="2026-05-15" /></View>
+            <View style={{ flex: 1 }}><EliteInput label="Heure (HH:MM) *" value={coursForm.heure_debut} onChangeText={(v) => setCoursForm({ ...coursForm, heure_debut: v })} placeholder="09:00" /></View>
+          </View>
+          <EliteInput label="Salle *" value={coursForm.salle} onChangeText={(v) => setCoursForm({ ...coursForm, salle: v })} placeholder="Salle A" />
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteInput label="Durée (min)" value={coursForm.duree_minutes} onChangeText={(v) => setCoursForm({ ...coursForm, duree_minutes: v })} keyboardType="numeric" /></View>
+            <View style={{ flex: 1 }}><EliteInput label="Capacité max" value={coursForm.capacite_max} onChangeText={(v) => setCoursForm({ ...coursForm, capacite_max: v })} keyboardType="numeric" /></View>
+          </View>
+          <View style={[s.infoBox, { backgroundColor: "#10b98110", borderColor: "#10b98130" }]}>
+            <Text style={[s.sub, { color: "#065f46" }]}>✓ Cours directement publié (sans validation)</Text>
+          </View>
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddCours(false)} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title="Créer & Publier" onPress={handleCreateCours} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
+      </Modal>
+
+      {/* Modal Équipement */}
       <Modal visible={showAddEquipement} animationType="slide" transparent onRequestClose={() => setShowAddEquipement(false)}>
-        <View style={s.overlay}>
-          <ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-            <Text style={[s.modalTitle, { color: colors.foreground }]}>{editEquipement ? "Modifier l'équipement" : "Nouvel équipement"}</Text>
-            <EliteInput label="Nom" value={equipForm.nom} onChangeText={(v) => setEquipForm({ ...equipForm, nom: v })} placeholder="ex: Tapis de course" />
-            <EliteInput label="Catégorie" value={equipForm.categorie} onChangeText={(v) => setEquipForm({ ...equipForm, categorie: v })} placeholder="Musculation, Cardio, Boxe..." />
-            <EliteInput label="Quantité" value={equipForm.quantite} onChangeText={(v) => setEquipForm({ ...equipForm, quantite: v })} keyboardType="numeric" />
-            <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>État</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-              {Object.entries(ETAT_INFO).map(([key, info]) => (
-                <TouchableOpacity key={key} onPress={() => setEquipForm({ ...equipForm, etat: key })}
-                  style={[s.modeBtn, { backgroundColor: equipForm.etat === key ? info.color : colors.background, borderColor: equipForm.etat === key ? info.color : colors.border }]}>
-                  <Text style={{ color: equipForm.etat === key ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{info.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <EliteInput label="Notes (optionnel)" value={equipForm.notes} onChangeText={(v) => setEquipForm({ ...equipForm, notes: v })} placeholder="Observations, maintenance..." />
-            <View style={s.rowGap}>
-              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddEquipement(false); setEditEquipement(null); }} variant="outline" /></View>
-              <View style={{ flex: 1 }}><EliteButton title={editEquipement ? "Enregistrer" : "Ajouter"} onPress={handleSaveEquipement} loading={loading} /></View>
-            </View>
-          </View></ScrollView>
-        </View>
+        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
+          <Text style={[s.modalTitle, { color: colors.foreground }]}>{editEquipement ? "Modifier" : "Nouvel équipement"}</Text>
+          <EliteInput label="Nom" value={equipForm.nom} onChangeText={(v) => setEquipForm({ ...equipForm, nom: v })} placeholder="ex: Tapis de course" />
+          <EliteInput label="Catégorie" value={equipForm.categorie} onChangeText={(v) => setEquipForm({ ...equipForm, categorie: v })} />
+          <EliteInput label="Quantité" value={equipForm.quantite} onChangeText={(v) => setEquipForm({ ...equipForm, quantite: v })} keyboardType="numeric" />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            {Object.entries(ETAT_INFO).map(([key, info]) => (
+              <TouchableOpacity key={key} onPress={() => setEquipForm({ ...equipForm, etat: key })}
+                style={[s.modeBtn, { backgroundColor: equipForm.etat === key ? info.color : colors.background, borderColor: equipForm.etat === key ? info.color : colors.border }]}>
+                <Text style={{ color: equipForm.etat === key ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{info.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <EliteInput label="Notes (optionnel)" value={equipForm.notes} onChangeText={(v) => setEquipForm({ ...equipForm, notes: v })} />
+          <View style={s.rowGap}>
+            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddEquipement(false); setEditEquipement(null); }} variant="outline" /></View>
+            <View style={{ flex: 1 }}><EliteButton title={editEquipement ? "Enregistrer" : "Ajouter"} onPress={handleSaveEquipement} loading={loading} /></View>
+          </View>
+        </View></ScrollView></View>
       </Modal>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", paddingHorizontal: 16, paddingBottom: 16 },
-  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "800" },
-  headerSub: { color: "rgba(255,255,255,0.8)", fontSize: 13 },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 14, gap: 12 },
+  headerAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  headerAvatarText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  headerTitle: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  headerSub: { color: "rgba(255,255,255,0.75)", fontSize: 11 },
+  notifBadge: { position: "absolute", top: -4, right: -4, backgroundColor: "#E63946", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
+  notifBadgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
   statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
   statCard: { flex: 1, borderRadius: 10, padding: 10, alignItems: "center", borderWidth: 1 },
   statNum: { fontSize: 20, fontWeight: "800" },
@@ -992,4 +1171,8 @@ const s = StyleSheet.create({
   revCard: { borderRadius: 10, padding: 12, gap: 4, borderWidth: 1, alignItems: "center" },
   revNum: { fontSize: 18, fontWeight: "800" },
   revLabel: { fontSize: 11 },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, marginBottom: 8 },
+  searchInput: { flex: 1, fontSize: 13 },
+  calCell: { width: "14.28%", minHeight: 44, padding: 2, gap: 1 },
+  calEvent: { borderRadius: 3, paddingHorizontal: 2, paddingVertical: 1 },
 });

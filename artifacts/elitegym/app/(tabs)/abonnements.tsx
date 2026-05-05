@@ -1,488 +1,325 @@
 import React, { useEffect, useState } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, RefreshControl, Platform,
-  Alert, Modal, TouchableOpacity, TextInput, ActivityIndicator,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Platform, Alert, Modal, TouchableOpacity, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { api } from "@/lib/api";
 import EliteButton from "@/components/EliteButton";
-import NotifBanner from "@/components/NotifBanner";
 import { Feather } from "@expo/vector-icons";
 
-const PAYMENT_METHODS = [
-  {
-    id: "cib",
-    label: "Carte CIB / Edahabia",
-    icon: "credit-card",
-    color: "#1a56db",
-    desc: "Visa, Mastercard, CIB interbancaire",
-  },
-  {
-    id: "baridimob",
-    label: "BaridiMob",
-    icon: "smartphone",
-    color: "#00a651",
-    desc: "Paiement mobile Algérie Poste",
-  },
-  {
-    id: "virement",
-    label: "Virement bancaire",
-    icon: "repeat",
-    color: "#7c3aed",
-    desc: "Virement depuis votre banque",
-  },
-];
-
-function daysUntil(dateStr: string): number {
-  const d = new Date(dateStr);
-  const now = new Date();
-  return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+function generatePdfHtml(paiement: any, membre: any) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reçu — Elite Gym</title>
+<style>body{font-family:Arial,sans-serif;padding:40px;max-width:600px;margin:0 auto}
+h1{color:#E63946;border-bottom:2px solid #E63946;padding-bottom:10px}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee}
+.label{color:#666}.value{font-weight:bold}
+.total{font-size:1.4em;color:#E63946;margin-top:10px}
+.footer{margin-top:40px;text-align:center;color:#999;font-size:12px}
+.badge{display:inline-block;background:#10b98120;color:#10b981;padding:4px 12px;border-radius:6px;font-weight:bold}
+</style></head><body>
+<h1>🏋️ Elite Gym — Reçu de paiement</h1>
+<div class="row"><span class="label">N° Paiement</span><span class="value">#${paiement.id_paiement||"—"}</span></div>
+<div class="row"><span class="label">Membre</span><span class="value">${membre?.prenom||""} ${membre?.nom||""}</span></div>
+<div class="row"><span class="label">Date</span><span class="value">${new Date(paiement.date_heure||Date.now()).toLocaleString("fr-FR")}</span></div>
+<div class="row"><span class="label">Motif</span><span class="value">${paiement.motif||"Abonnement"}${paiement.formule_nom?" — "+paiement.formule_nom:""}</span></div>
+<div class="row"><span class="label">Mode de paiement</span><span class="value">${paiement.mode_paiement||"espèces"}</span></div>
+<div class="row"><span class="label">Statut</span><span class="value"><span class="badge">✓ Validé</span></span></div>
+<div class="row total"><span class="label">MONTANT TOTAL</span><span class="value">${Number(paiement.montant||0).toLocaleString("fr-DZ")} DA</span></div>
+<div class="footer">Elite Gym · Reçu généré le ${new Date().toLocaleString("fr-FR")}</div>
+</body></html>`;
 }
+
+const MODES_PAIEMENT = ["espèces","CIB","BaridiMob","virement","chèque"];
 
 export default function AbonnementsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [formules, setFormules] = useState<any[]>([]);
+  const [paiements, setPaiements] = useState<any[]>([]);
   const [abonnement, setAbonnement] = useState<any>(null);
+  const [formules, setFormules] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Paiement
+  const [showRenouveler, setShowRenouveler] = useState(false);
   const [selectedFormule, setSelectedFormule] = useState<any>(null);
-  const [showPayModal, setShowPayModal] = useState(false);
-  const [payMethod, setPayMethod] = useState("cib");
-  const [cardNum, setCardNum] = useState("");
-  const [cardExp, setCardExp] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
-  const [cardName, setCardName] = useState("");
-  const [paying, setPaying] = useState(false);
-  const [paySuccess, setPaySuccess] = useState(false);
+  const [selectedMode, setSelectedMode] = useState("espèces");
+  const [renouvLoading, setRenouvLoading] = useState(false);
 
   const load = async () => {
+    if (!user?.id_membre) return;
     try {
-      const f = await api.get("/abonnements/formules");
-      setFormules(f);
-      if (user?.id_membre) {
-        const a = await api.get(`/abonnements/membre/${user.id_membre}`);
-        const actif = a.find((ab: any) => ab.statut === "actif");
-        setAbonnement(actif || null);
+      const [p, f] = await Promise.all([
+        api.get(`/paiements/membre/${user.id_membre}`),
+        api.get("/admin/formules").catch(() => []),
+      ]);
+      setPaiements(p);
+      // Abonnement actif
+      const aboResp = await api.get(`/abonnements/membre/${user.id_membre}`).catch(() => null);
+      if (aboResp && aboResp.length > 0) {
+        const sorted = [...aboResp].sort((a: any, b: any) => new Date(b.date_fin).getTime() - new Date(a.date_fin).getTime());
+        setAbonnement(sorted[0]);
       }
+      setFormules(f.filter((f: any) => f.actif));
     } catch {}
+    setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  const handleOpenPay = (formule: any) => {
-    setSelectedFormule(formule);
-    setPaySuccess(false);
-    setCardNum(""); setCardExp(""); setCardCvv(""); setCardName("");
-    setShowPayModal(true);
-  };
-
-  const handlePayer = async () => {
-    if (payMethod === "cib") {
-      const cleaned = cardNum.replace(/\s/g, "");
-      if (cleaned.length < 16) { Alert.alert("Erreur", "Numéro de carte invalide (16 chiffres)"); return; }
-      if (!cardExp.match(/^\d{2}\/\d{2}$/)) { Alert.alert("Erreur", "Date d'expiration invalide (MM/AA)"); return; }
-      if (cardCvv.length < 3) { Alert.alert("Erreur", "CVV invalide (3 chiffres)"); return; }
-      if (!cardName) { Alert.alert("Erreur", "Nom du titulaire requis"); return; }
-    }
-
-    setPaying(true);
-    // Simulation d'un traitement de paiement (1.5s)
-    await new Promise((r) => setTimeout(r, 1500));
+  const handleRenouveler = async () => {
+    if (!selectedFormule) { Alert.alert("Erreur", "Sélectionnez une formule"); return; }
+    setRenouvLoading(true);
     try {
-      await api.post("/abonnements", {
+      // Enregistrer abonnement en ligne + paiement en attente
+      const result = await api.post("/abonnements/renouveler", {
         id_membre: user?.id_membre,
+        id_util: user?.id,
         id_formule: selectedFormule.id_formule,
-        date_debut: new Date().toISOString().slice(0, 10),
+        mode_paiement: selectedMode,
+        montant: selectedFormule.tarif,
       });
-      setPaySuccess(true);
-      load();
-    } catch (e: any) {
-      Alert.alert("Erreur", e.message);
+      Alert.alert(
+        "Demande envoyée ✓",
+        `Votre demande de renouvellement (${selectedFormule.nom} — ${Number(selectedFormule.tarif).toLocaleString()} DA) a été enregistrée.\n\nL'admin validera le paiement.`,
+        [{ text: "OK", onPress: () => { setShowRenouveler(false); load(); } }]
+      );
+    } catch (e: any) { Alert.alert("Erreur", e.message); }
+    finally { setRenouvLoading(false); }
+  };
+
+  const handleExportPdf = (p: any) => {
+    const html = generatePdfHtml(p, user);
+    if (Platform.OS === "web") {
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } else {
+      Alert.alert("Reçu PDF", `Reçu #${p.id_paiement} — ${Number(p.montant).toLocaleString()} DA\n\nFonction disponible sur la version web.`);
     }
-    setPaying(false);
   };
 
-  const closePay = () => {
-    setShowPayModal(false);
-    setPaySuccess(false);
-  };
+  const aboExpire = abonnement ? new Date(abonnement.date_fin) < new Date() : true;
+  const aboResilié = abonnement?.statut === "resilié";
+  const jRestants = abonnement && !aboExpire && !aboResilié
+    ? Math.ceil((new Date(abonnement.date_fin).getTime() - Date.now()) / 86400000)
+    : 0;
 
-  const joursRestants = abonnement ? daysUntil(abonnement.date_fin) : null;
+  const totalPaye = paiements.filter((p: any) => p.statut === "valide").reduce((s: number, p: any) => s + Number(p.montant), 0);
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={[
-        styles.container,
-        { paddingTop: Platform.OS === "web" ? 90 : insets.top + 16, paddingBottom: 100 },
-      ]}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <Text style={[styles.title, { color: colors.foreground }]}>Abonnements</Text>
-
-      {/* Bannière expiration */}
-      {joursRestants !== null && joursRestants <= 7 && joursRestants > 0 && (
-        <NotifBanner
-          type="warning"
-          message={`Votre abonnement "${abonnement.nom}" expire dans ${joursRestants} jour${joursRestants > 1 ? "s" : ""} ! Renouvelez maintenant pour continuer à profiter de la salle.`}
-        />
-      )}
-      {joursRestants !== null && joursRestants <= 0 && (
-        <NotifBanner
-          type="danger"
-          message="Votre abonnement a expiré. Renouvelez votre abonnement pour accéder aux cours."
-        />
-      )}
-
-      {/* Abonnement actif */}
-      {abonnement && joursRestants !== null && joursRestants > 0 && (
-        <View style={[styles.currentCard, { backgroundColor: colors.primary }]}>
-          <View style={styles.currentRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.currentLabel}>Abonnement actif</Text>
-              <Text style={styles.currentNom}>{abonnement.nom}</Text>
-              <Text style={styles.currentDate}>
-                Du {abonnement.date_debut?.slice(0, 10)} au {abonnement.date_fin?.slice(0, 10)}
-              </Text>
-            </View>
-            <View style={styles.joursBox}>
-              <Text style={styles.joursNum}>{joursRestants}</Text>
-              <Text style={styles.joursLabel}>jours{"\n"}restants</Text>
-            </View>
-          </View>
-          <View style={[styles.progressBar, { backgroundColor: "rgba(255,255,255,0.2)" }]}>
-            <View style={[styles.progressFill, {
-              width: `${Math.min(100, Math.max(0, (joursRestants / (abonnement.duree_jours || 30)) * 100))}%`,
-              backgroundColor: "rgba(255,255,255,0.9)",
-            }]} />
-          </View>
-        </View>
-      )}
-
-      <Text style={[styles.section, { color: colors.foreground }]}>Nos formules</Text>
-      <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>
-        Paiement 100% sécurisé · CIB · BaridiMob · Virement
-      </Text>
-
-      {formules.map((f: any) => (
-        <View key={f.id_formule} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.nom, { color: colors.foreground }]}>{f.nom}</Text>
-              <Text style={[styles.duree, { color: colors.mutedForeground }]}>{f.duree_jours} jours</Text>
-            </View>
-            <View style={{ alignItems: "flex-end" }}>
-              <Text style={[styles.prix, { color: colors.primary }]}>{Number(f.tarif).toLocaleString()} DA</Text>
-              <Text style={[styles.prixMois, { color: colors.mutedForeground }]}>
-                {Math.round(Number(f.tarif) / (f.duree_jours / 30)).toLocaleString()} DA/mois
-              </Text>
-            </View>
-          </View>
-
-          {f.description ? (
-            <Text style={[styles.desc, { color: colors.mutedForeground }]}>{f.description}</Text>
-          ) : null}
-
-          {/* Avantages */}
-          <View style={styles.avantages}>
-            {[
-              "Accès salle illimité",
-              "Vestiaires & douches",
-              f.duree_jours >= 90 && "Coach personnel inclus",
-              f.duree_jours >= 180 && "Bilan nutritionnel offert",
-            ].filter(Boolean).map((a: any) => (
-              <View key={a} style={styles.avRow}>
-                <Feather name="check" size={12} color="#10b981" />
-                <Text style={[styles.avText, { color: colors.mutedForeground }]}>{a}</Text>
-              </View>
-            ))}
-          </View>
-
-          {user?.role === "membre" && (
-            <EliteButton
-              title={abonnement ? "🔄 Renouveler en ligne" : "💳 Payer en ligne"}
-              onPress={() => handleOpenPay(f)}
-              variant="primary"
-              small
-            />
-          )}
-        </View>
-      ))}
-
-      <View style={[styles.secureBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Feather name="shield" size={18} color="#10b981" />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.secureTitle, { color: colors.foreground }]}>Paiement 100% sécurisé</Text>
-          <Text style={[styles.secureText, { color: colors.mutedForeground }]}>
-            Vos informations de paiement sont chiffrées et ne sont jamais stockées sur nos serveurs.
-            Transactions conformes aux normes PCI-DSS.
-          </Text>
-        </View>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={[ab.topBar, { backgroundColor: colors.secondary, paddingTop: Platform.OS === "web" ? 20 : insets.top + 8 }]}>
+        <Feather name="credit-card" size={20} color="#fff" />
+        <Text style={ab.topBarTitle}>Paiements & Abonnement</Text>
       </View>
 
-      {/* Modal de paiement */}
-      <Modal visible={showPayModal} animationType="slide" transparent>
-        <View style={styles.overlay}>
-          <View style={[styles.modalWrap, { backgroundColor: colors.background }]}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {paySuccess ? (
-                <View style={styles.successView}>
-                  <View style={styles.successIcon}>
-                    <Feather name="check-circle" size={60} color="#10b981" />
-                  </View>
-                  <Text style={[styles.successTitle, { color: colors.foreground }]}>Paiement validé !</Text>
-                  <Text style={[styles.successText, { color: colors.mutedForeground }]}>
-                    Votre abonnement <Text style={{ fontWeight: "800", color: colors.primary }}>{selectedFormule?.nom}</Text> est maintenant actif.{"\n"}
-                    Confirmation envoyée sur votre numéro enregistré.
+      <ScrollView contentContainerStyle={[ab.content, { paddingBottom: 90 }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        {loading ? (
+          <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
+        ) : (
+          <>
+            {/* Abonnement actuel */}
+            <View style={[ab.card, {
+              backgroundColor: (!abonnement || aboExpire || aboResilié) ? "#ef444410" : "#10b98110",
+              borderColor: (!abonnement || aboExpire || aboResilié) ? "#ef444440" : "#10b98140",
+              borderWidth: 1.5,
+            }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Feather
+                  name={(!abonnement || aboExpire || aboResilié) ? "alert-circle" : "check-circle"}
+                  size={24}
+                  color={(!abonnement || aboExpire || aboResilié) ? "#ef4444" : "#10b981"}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[ab.sectionTitle, { color: colors.foreground }]}>
+                    {!abonnement ? "Aucun abonnement" : aboResilié ? "Abonnement résilié" : aboExpire ? "Abonnement expiré" : "Abonnement actif"}
                   </Text>
-                  <View style={[styles.receiptBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <ReceiptRow label="Formule" value={selectedFormule?.nom} />
-                    <ReceiptRow label="Montant" value={`${Number(selectedFormule?.tarif).toLocaleString()} DA`} />
-                    <ReceiptRow label="Méthode" value={PAYMENT_METHODS.find(m => m.id === payMethod)?.label ?? ""} />
-                    <ReceiptRow label="Date" value={new Date().toLocaleDateString("fr-FR")} />
-                    <ReceiptRow label="Référence" value={`EG-${Math.random().toString(36).slice(2, 10).toUpperCase()}`} />
-                  </View>
-                  <EliteButton title="Fermer" onPress={closePay} />
+                  {abonnement && (
+                    <>
+                      <Text style={[ab.sub, { color: colors.primary, fontWeight: "700" }]}>{abonnement.formule_nom}</Text>
+                      <Text style={[ab.sub, { color: colors.mutedForeground }]}>
+                        Du {abonnement.date_debut?.slice(0,10)} au {abonnement.date_fin?.slice(0,10)}
+                      </Text>
+                      {!aboExpire && !aboResilié && (
+                        <Text style={[ab.sub, { color: "#10b981", fontWeight: "700" }]}>⏱ {jRestants} jour{jRestants > 1 ? "s" : ""} restant{jRestants > 1 ? "s" : ""}</Text>
+                      )}
+                    </>
+                  )}
                 </View>
-              ) : (
-                <>
-                  <View style={styles.modalHeader}>
-                    <View>
-                      <Text style={[styles.modalTitle, { color: colors.foreground }]}>Paiement en ligne</Text>
-                      <Text style={[styles.modalSub, { color: colors.mutedForeground }]}>{selectedFormule?.nom}</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setShowPayModal(false)}>
-                      <Feather name="x" size={22} color={colors.mutedForeground} />
-                    </TouchableOpacity>
+              </View>
+              <TouchableOpacity onPress={() => { setSelectedFormule(null); setShowRenouveler(true); }}
+                style={[ab.renouvBtn, { backgroundColor: colors.primary }]}>
+                <Feather name="refresh-cw" size={14} color="#fff" />
+                <Text style={ab.renouvBtnText}>{(!abonnement || aboExpire || aboResilié) ? "S'abonner en ligne" : "Renouveler"}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Résumé paiements */}
+            {paiements.length > 0 && (
+              <View style={[ab.card, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
+                <Text style={[ab.sectionTitle, { color: colors.foreground }]}>Résumé des paiements</Text>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View style={[ab.statPill, { backgroundColor: colors.primary + "15" }]}>
+                    <Text style={[ab.statVal, { color: colors.primary }]}>{totalPaye.toLocaleString()} DA</Text>
+                    <Text style={[ab.statLabel, { color: colors.primary }]}>Total payé</Text>
                   </View>
+                  <View style={[ab.statPill, { backgroundColor: "#10b98115" }]}>
+                    <Text style={[ab.statVal, { color: "#10b981" }]}>{paiements.filter((p: any) => p.statut === "valide").length}</Text>
+                    <Text style={[ab.statLabel, { color: "#10b981" }]}>Paiements</Text>
+                  </View>
+                </View>
+              </View>
+            )}
 
-                  <View style={[styles.amountBadge, { backgroundColor: colors.primary + "15" }]}>
-                    <Text style={[styles.amountText, { color: colors.primary }]}>
-                      {Number(selectedFormule?.tarif).toLocaleString()} DA
-                    </Text>
-                    <Text style={[styles.amountSub, { color: colors.primary + "99" }]}>
-                      {selectedFormule?.duree_jours} jours d'accès
+            {/* Liste paiements */}
+            <Text style={[ab.sectionTitle, { color: colors.foreground }]}>Historique</Text>
+            {paiements.length === 0 ? (
+              <View style={[ab.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: "center", paddingVertical: 30, gap: 10 }]}>
+                <Feather name="credit-card" size={30} color={colors.mutedForeground} />
+                <Text style={{ color: colors.mutedForeground, textAlign: "center" }}>Aucun paiement enregistré.</Text>
+              </View>
+            ) : paiements.map((p: any) => (
+              <View key={p.id_paiement} style={[ab.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[ab.sectionTitle, { color: colors.foreground, fontSize: 14 }]}>{p.motif || "Paiement"}</Text>
+                    {p.formule_nom && <Text style={[ab.sub, { color: colors.primary }]}>{p.formule_nom}</Text>}
+                    <Text style={[ab.sub, { color: colors.mutedForeground }]}>
+                      {new Date(p.date_heure).toLocaleDateString("fr-FR")} · {p.mode_paiement}
                     </Text>
                   </View>
-
-                  {/* Choix méthode */}
-                  <Text style={[styles.label, { color: colors.foreground }]}>Méthode de paiement</Text>
-                  {PAYMENT_METHODS.map((m) => (
-                    <TouchableOpacity
-                      key={m.id}
-                      onPress={() => setPayMethod(m.id)}
-                      style={[
-                        styles.methodBtn,
-                        { borderColor: payMethod === m.id ? m.color : colors.border, backgroundColor: payMethod === m.id ? m.color + "10" : colors.card },
-                      ]}
-                    >
-                      <View style={[styles.methodIcon, { backgroundColor: m.color + "20" }]}>
-                        <Feather name={m.icon as any} size={18} color={m.color} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.methodLabel, { color: colors.foreground }]}>{m.label}</Text>
-                        <Text style={[styles.methodDesc, { color: colors.mutedForeground }]}>{m.desc}</Text>
-                      </View>
-                      <View style={[styles.methodRadio, { borderColor: payMethod === m.id ? m.color : colors.border }]}>
-                        {payMethod === m.id && <View style={[styles.methodRadioDot, { backgroundColor: m.color }]} />}
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-
-                  {/* Formulaire CIB */}
-                  {payMethod === "cib" && (
-                    <View style={[styles.cardForm, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                      <Text style={[styles.cardFormTitle, { color: colors.foreground }]}>Informations de carte</Text>
-
-                      <Text style={[styles.label, { color: colors.mutedForeground }]}>Numéro de carte</Text>
-                      <TextInput
-                        style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background }]}
-                        placeholder="1234  5678  9012  3456"
-                        placeholderTextColor={colors.mutedForeground}
-                        keyboardType="numeric"
-                        maxLength={19}
-                        value={cardNum}
-                        onChangeText={(v) => {
-                          const clean = v.replace(/\D/g, "").slice(0, 16);
-                          setCardNum(clean.replace(/(.{4})/g, "$1 ").trim());
-                        }}
-                      />
-
-                      <View style={{ flexDirection: "row", gap: 10 }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.label, { color: colors.mutedForeground }]}>Expiration</Text>
-                          <TextInput
-                            style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background }]}
-                            placeholder="MM/AA"
-                            placeholderTextColor={colors.mutedForeground}
-                            keyboardType="numeric"
-                            maxLength={5}
-                            value={cardExp}
-                            onChangeText={(v) => {
-                              const clean = v.replace(/\D/g, "").slice(0, 4);
-                              setCardExp(clean.length > 2 ? clean.slice(0, 2) + "/" + clean.slice(2) : clean);
-                            }}
-                          />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.label, { color: colors.mutedForeground }]}>CVV</Text>
-                          <TextInput
-                            style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background }]}
-                            placeholder="123"
-                            placeholderTextColor={colors.mutedForeground}
-                            keyboardType="numeric"
-                            maxLength={3}
-                            secureTextEntry
-                            value={cardCvv}
-                            onChangeText={setCardCvv}
-                          />
-                        </View>
-                      </View>
-
-                      <Text style={[styles.label, { color: colors.mutedForeground }]}>Nom du titulaire</Text>
-                      <TextInput
-                        style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background }]}
-                        placeholder="PRENOM NOM"
-                        placeholderTextColor={colors.mutedForeground}
-                        autoCapitalize="characters"
-                        value={cardName}
-                        onChangeText={setCardName}
-                      />
-                    </View>
-                  )}
-
-                  {payMethod === "baridimob" && (
-                    <View style={[styles.cardForm, { backgroundColor: "#00a65110", borderColor: "#00a65140" }]}>
-                      <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
-                        <Feather name="smartphone" size={18} color="#00a651" style={{ marginTop: 2 }} />
-                        <Text style={[styles.altPayText, { color: "#1a5c2a" }]}>
-                          Après validation, vous recevrez un SMS de confirmation BaridiMob sur le numéro enregistré dans votre compte EliteGym.{"\n\n"}
-                          Code marchand : <Text style={{ fontWeight: "900" }}>ELITEGYM-BJA</Text>
-                        </Text>
-                      </View>
-                    </View>
-                  )}
-
-                  {payMethod === "virement" && (
-                    <View style={[styles.cardForm, { backgroundColor: "#7c3aed10", borderColor: "#7c3aed40" }]}>
-                      <Text style={[styles.cardFormTitle, { color: "#4c1d95" }]}>Coordonnées bancaires</Text>
-                      {[
-                        ["Bénéficiaire", "ELITE GYM BEJAIA SARL"],
-                        ["Banque", "BNA — Agence Béjaïa Centre"],
-                        ["RIB", "002 00063 0000 123456789 78"],
-                        ["Motif", `Abonnement ${selectedFormule?.nom} — ${user?.prenom} ${user?.nom}`],
-                      ].map(([k, v]) => (
-                        <View key={k} style={styles.rib}>
-                          <Text style={{ fontSize: 11, color: "#7c3aed", fontWeight: "700" }}>{k}</Text>
-                          <Text style={{ fontSize: 12, fontWeight: "600", color: "#4c1d95" }}>{v}</Text>
-                        </View>
-                      ))}
-                      <Text style={{ fontSize: 11, color: "#7c3aed", marginTop: 4 }}>
-                        ⚠️ Votre abonnement sera activé après réception du virement (24-48h ouvrables).
+                  <View style={{ alignItems: "flex-end", gap: 6 }}>
+                    <Text style={{ fontSize: 16, fontWeight: "800", color: p.statut === "valide" ? "#10b981" : "#f59e0b" }}>
+                      {Number(p.montant).toLocaleString()} DA
+                    </Text>
+                    <View style={[ab.badge, { backgroundColor: p.statut === "valide" ? "#10b98120" : "#f59e0b20" }]}>
+                      <Text style={{ fontSize: 11, fontWeight: "700", color: p.statut === "valide" ? "#10b981" : "#f59e0b" }}>
+                        {p.statut === "valide" ? "✓ Validé" : p.statut === "en_attente" ? "⏳ En attente" : p.statut}
                       </Text>
                     </View>
-                  )}
-
-                  <View style={styles.secureRow}>
-                    <Feather name="lock" size={12} color="#10b981" />
-                    <Text style={[styles.secureSmall, { color: colors.mutedForeground }]}>
-                      Paiement chiffré SSL 256-bit · PCI-DSS
-                    </Text>
                   </View>
+                </View>
+                {p.statut === "valide" && (
+                  <TouchableOpacity onPress={() => handleExportPdf(p)}
+                    style={[ab.pdfBtn, { backgroundColor: "#3b82f615", borderColor: "#3b82f6" }]}>
+                    <Feather name="file-text" size={13} color="#3b82f6" />
+                    <Text style={{ color: "#3b82f6", fontSize: 12, fontWeight: "700" }}>Télécharger le reçu PDF</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+          </>
+        )}
+      </ScrollView>
 
-                  <EliteButton
-                    title={paying ? "Traitement en cours..." : `Payer ${Number(selectedFormule?.tarif).toLocaleString()} DA`}
-                    onPress={handlePayer}
-                    loading={paying}
-                  />
-                  <EliteButton title="Annuler" onPress={() => setShowPayModal(false)} variant="outline" />
-                </>
-              )}
-            </ScrollView>
-          </View>
+      {/* Modal renouvellement */}
+      <Modal visible={showRenouveler} animationType="slide" transparent onRequestClose={() => setShowRenouveler(false)}>
+        <View style={ab.overlay}>
+          <ScrollView><View style={[ab.sheet, { backgroundColor: colors.card }]}>
+            <View style={[ab.handle, { backgroundColor: colors.border }]} />
+            <Text style={[ab.modalTitle, { color: colors.foreground }]}>
+              {(!abonnement || aboExpire || aboResilié) ? "S'abonner en ligne" : "Renouveler l'abonnement"}
+            </Text>
+            <Text style={[ab.sub, { color: colors.mutedForeground, textAlign: "center" }]}>
+              Sélectionnez une formule. Votre demande sera enregistrée et l'admin validera le paiement.
+            </Text>
+
+            {/* Formules */}
+            <Text style={[ab.fieldLabel, { color: colors.foreground }]}>Formule *</Text>
+            {formules.length === 0 ? (
+              <Text style={[ab.sub, { color: colors.mutedForeground, textAlign: "center" }]}>Aucune formule disponible</Text>
+            ) : formules.map((f: any) => (
+              <TouchableOpacity key={f.id_formule} onPress={() => setSelectedFormule(f)}
+                style={[ab.formulaCard, {
+                  backgroundColor: selectedFormule?.id_formule === f.id_formule ? colors.primary + "15" : colors.background,
+                  borderColor: selectedFormule?.id_formule === f.id_formule ? colors.primary : colors.border,
+                  borderWidth: selectedFormule?.id_formule === f.id_formule ? 2 : 1,
+                }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[ab.sectionTitle, { color: colors.foreground, fontSize: 14 }]}>{f.nom}</Text>
+                  {f.description ? <Text style={[ab.sub, { color: colors.mutedForeground }]}>{f.description}</Text> : null}
+                  <Text style={[ab.sub, { color: colors.mutedForeground }]}>{f.duree_jours} jours</Text>
+                </View>
+                <View style={{ alignItems: "flex-end", gap: 4 }}>
+                  <Text style={{ fontSize: 18, fontWeight: "900", color: colors.primary }}>{Number(f.tarif).toLocaleString()} DA</Text>
+                  {selectedFormule?.id_formule === f.id_formule && <Feather name="check-circle" size={18} color={colors.primary} />}
+                </View>
+              </TouchableOpacity>
+            ))}
+
+            {/* Mode de paiement */}
+            <Text style={[ab.fieldLabel, { color: colors.foreground }]}>Mode de paiement</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {MODES_PAIEMENT.map((mode) => (
+                <TouchableOpacity key={mode} onPress={() => setSelectedMode(mode)}
+                  style={[ab.modeBtn, {
+                    backgroundColor: selectedMode === mode ? colors.primary : colors.background,
+                    borderColor: selectedMode === mode ? colors.primary : colors.border,
+                  }]}>
+                  <Text style={{ color: selectedMode === mode ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{mode}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Récap */}
+            {selectedFormule && (
+              <View style={[ab.recapBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <Text style={[ab.sub, { color: colors.foreground, fontWeight: "700" }]}>Formule :</Text>
+                  <Text style={[ab.sub, { color: colors.foreground }]}>{selectedFormule.nom}</Text>
+                </View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <Text style={[ab.sub, { color: colors.foreground, fontWeight: "700" }]}>Montant :</Text>
+                  <Text style={[ab.sub, { color: colors.primary, fontWeight: "800" }]}>{Number(selectedFormule.tarif).toLocaleString()} DA</Text>
+                </View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <Text style={[ab.sub, { color: colors.foreground, fontWeight: "700" }]}>Mode :</Text>
+                  <Text style={[ab.sub, { color: colors.foreground }]}>{selectedMode}</Text>
+                </View>
+              </View>
+            )}
+
+            <View style={[ab.infoBox, { backgroundColor: "#f59e0b10", borderColor: "#f59e0b30" }]}>
+              <Feather name="info" size={14} color="#b45309" />
+              <Text style={[ab.sub, { color: "#b45309", flex: 1 }]}>
+                Votre demande sera enregistrée. L'abonnement sera activé après validation du paiement par l'administrateur. Vous recevrez une notification.
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowRenouveler(false)} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title={renouvLoading ? "Envoi..." : "Confirmer"} onPress={handleRenouveler} loading={renouvLoading} disabled={!selectedFormule} /></View>
+            </View>
+          </View></ScrollView>
         </View>
       </Modal>
-    </ScrollView>
-  );
-}
-
-function ReceiptRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 }}>
-      <Text style={{ fontSize: 13, color: "#6b7280" }}>{label}</Text>
-      <Text style={{ fontSize: 13, fontWeight: "700", color: "#111" }}>{value}</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { paddingHorizontal: 16, gap: 14 },
-  title: { fontSize: 22, fontWeight: "800" },
-  currentCard: { borderRadius: 14, padding: 18, gap: 10 },
-  currentRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  currentLabel: { color: "rgba(255,255,255,0.8)", fontSize: 13 },
-  currentNom: { color: "#fff", fontSize: 20, fontWeight: "800" },
-  currentDate: { color: "rgba(255,255,255,0.8)", fontSize: 12, marginTop: 2 },
-  joursBox: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 10, padding: 10 },
-  joursNum: { color: "#fff", fontSize: 28, fontWeight: "900" },
-  joursLabel: { color: "rgba(255,255,255,0.8)", fontSize: 10, textAlign: "center" },
-  progressBar: { height: 4, borderRadius: 2, overflow: "hidden" },
-  progressFill: { height: "100%", borderRadius: 2 },
-  section: { fontSize: 17, fontWeight: "700" },
-  sectionSub: { fontSize: 12, marginTop: -8 },
-  card: { borderRadius: 14, padding: 16, gap: 10, borderWidth: 1 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  nom: { fontSize: 17, fontWeight: "700" },
-  duree: { fontSize: 13 },
-  prix: { fontSize: 20, fontWeight: "900" },
-  prixMois: { fontSize: 11 },
-  desc: { fontSize: 13, lineHeight: 20 },
-  avantages: { gap: 4 },
-  avRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  avText: { fontSize: 12 },
-  secureBox: { flexDirection: "row", gap: 10, borderRadius: 12, padding: 14, borderWidth: 1, alignItems: "flex-start" },
-  secureTitle: { fontSize: 13, fontWeight: "700", marginBottom: 4 },
-  secureText: { fontSize: 12, lineHeight: 18 },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
-  modalWrap: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: "92%", gap: 14 },
-  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  modalTitle: { fontSize: 20, fontWeight: "800" },
-  modalSub: { fontSize: 13, marginTop: 2 },
-  amountBadge: { borderRadius: 12, padding: 16, alignItems: "center", gap: 2 },
-  amountText: { fontSize: 30, fontWeight: "900" },
-  amountSub: { fontSize: 12 },
-  label: { fontSize: 12, fontWeight: "600", marginBottom: 2 },
-  methodBtn: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    borderRadius: 12, borderWidth: 1.5, padding: 12,
-  },
-  methodIcon: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  methodLabel: { fontSize: 14, fontWeight: "700" },
-  methodDesc: { fontSize: 11, marginTop: 1 },
-  methodRadio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: "center", justifyContent: "center" },
-  methodRadioDot: { width: 10, height: 10, borderRadius: 5 },
-  cardForm: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 8 },
-  cardFormTitle: { fontSize: 14, fontWeight: "700", marginBottom: 4 },
-  input: {
-    borderWidth: 1, borderRadius: 10, paddingHorizontal: 14,
-    paddingVertical: 10, fontSize: 15, marginBottom: 2,
-  },
-  altPayText: { flex: 1, fontSize: 13, lineHeight: 20 },
-  rib: { gap: 2, borderBottomWidth: 1, borderBottomColor: "#7c3aed20", paddingBottom: 6 },
-  secureRow: { flexDirection: "row", alignItems: "center", gap: 5, justifyContent: "center" },
-  secureSmall: { fontSize: 11 },
-  successView: { alignItems: "center", gap: 14, paddingVertical: 10 },
-  successIcon: {
-    width: 100, height: 100, borderRadius: 50,
-    backgroundColor: "#dcfce7", alignItems: "center", justifyContent: "center",
-  },
-  successTitle: { fontSize: 24, fontWeight: "900" },
-  successText: { textAlign: "center", fontSize: 14, lineHeight: 22 },
-  receiptBox: { width: "100%", borderRadius: 12, borderWidth: 1, padding: 14, gap: 2 },
+const ab = StyleSheet.create({
+  topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingBottom: 14 },
+  topBarTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  content: { padding: 16, gap: 10 },
+  card: { borderRadius: 12, padding: 14, gap: 8, borderWidth: 1 },
+  sectionTitle: { fontSize: 15, fontWeight: "700" },
+  sub: { fontSize: 12, lineHeight: 18 },
+  statPill: { flex: 1, borderRadius: 10, padding: 10, alignItems: "center" },
+  statVal: { fontSize: 18, fontWeight: "900" },
+  statLabel: { fontSize: 11, fontWeight: "600" },
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  renouvBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 10, paddingVertical: 12, marginTop: 4 },
+  renouvBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  pdfBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 8, paddingVertical: 8, borderWidth: 1 },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, gap: 12, paddingBottom: 40 },
+  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
+  modalTitle: { fontSize: 18, fontWeight: "800", textAlign: "center" },
+  fieldLabel: { fontSize: 13, fontWeight: "700" },
+  formulaCard: { flexDirection: "row", alignItems: "center", borderRadius: 10, padding: 12, gap: 10 },
+  modeBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1 },
+  recapBox: { borderRadius: 10, padding: 12, gap: 6, borderWidth: 1 },
+  infoBox: { flexDirection: "row", alignItems: "flex-start", gap: 8, borderRadius: 8, padding: 10, borderWidth: 1 },
 });

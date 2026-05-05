@@ -28,7 +28,7 @@ router.get("/presence/:id_membre", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
       SELECT
-        r.id_reservation,
+        r.id_reservation, c.id_cours,
         r.statut,
         r.date_reservation,
         c.type_cours,
@@ -43,7 +43,7 @@ router.get("/presence/:id_membre", authMiddleware, async (req, res) => {
       JOIN utilisateur u ON co.id_util = u.id_util
       WHERE r.id_membre = ?
         AND r.statut = 'confirmee'
-        AND c.date_cours < CURDATE()
+        AND c.date_cours <= CURDATE()
       ORDER BY c.date_cours DESC, c.heure_debut DESC
     `, [req.params.id_membre]);
 

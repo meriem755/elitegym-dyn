@@ -54,4 +54,28 @@ router.delete("/:id", authMiddleware, async (req, res) => {
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
+
+router.get("/", async (req, res) => {
+  const { categorie, niveau } = req.query;
+  let query = "SELECT * FROM exercice WHERE 1=1";
+  const params: any[] = [];
+  
+  if (categorie) {
+    query += " AND categorie = ?";
+    params.push(categorie);
+  }
+  if (niveau) {
+    query += " AND niveau = ?";
+    params.push(niveau);
+  }
+  
+  try {
+    const [rows]: any = await pool.query(query, params);
+    res.json(rows);
+  } catch (err: any) {
+    req.log.error(err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
 export default router;

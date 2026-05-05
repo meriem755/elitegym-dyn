@@ -27,13 +27,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Charger l'utilisateur au démarrage
   useEffect(() => {
-    AsyncStorage.getItem("elitegym_user").then((val) => {
-      if (val) setUser(JSON.parse(val));
-      setIsLoading(false);
-    });
+    const loadUser = async () => {
+      try {
+        const val = await AsyncStorage.getItem("elitegym_user");
+        if (val) {
+          setUser(JSON.parse(val));
+        }
+      } catch (error) {
+        console.error("❌ Erreur chargement user:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadUser();
   }, []);
 
+  // ✅ Fonction de connexion (MANQUANTE - À AJOUTER)
   const login = async (data: any) => {
     const userData: User = {
       id: data.id,
@@ -50,15 +61,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(userData);
   };
 
+  // Fonction de mise à jour du profil
   const updateUser = async (patch: Partial<User>) => {
     const updated = { ...user, ...patch } as User;
     await AsyncStorage.setItem("elitegym_user", JSON.stringify(updated));
     setUser(updated);
   };
 
+  // Fonction de déconnexion
   const logout = async () => {
-    await AsyncStorage.removeItem("elitegym_user");
-    setUser(null);
+    console.log("🧹 [AuthContext] Début logout");
+    try {
+      await AsyncStorage.removeItem("elitegym_user");
+      console.log("🗑️ [AuthContext] elitegym_user supprimé");
+      setUser(null);
+      console.log("👤 [AuthContext] user mis à null");
+    } catch (error) {
+      console.error("❌ [AuthContext] Erreur logout:", error);
+    }
   };
 
   return (

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { createServer } from "http";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
@@ -17,6 +18,6 @@ if (Number.isNaN(port) || port <= 0) {
 const server = createServer(app);
 setupWss(server);
 
-server.listen(port, () => {
+server.listen(port, '0.0.0.0', () => {
   logger.info({ port }, "Server listening");
 });

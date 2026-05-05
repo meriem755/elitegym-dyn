@@ -13,6 +13,7 @@ import exercicesRouter from "./exercices.js";
 import chatRouter from "./chat.js";
 import avisRouter from "./avis.js";
 import presencesRouter from "./presences.js";
+import paiementsRouter from "./paiements.js";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use("/exercices", exercicesRouter);
 router.use("/chat", chatRouter);
 router.use("/avis", avisRouter);
 router.use("/presences", presencesRouter);
+router.use("/paiements", paiementsRouter);
 
 export default router;

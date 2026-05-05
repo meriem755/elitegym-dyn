@@ -9,9 +9,9 @@ const router = Router();
 router.get("/membres", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
-      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email, u.date_creation,
+      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email, u.date_creation, u.statut,
              m.id_membre, m.date_inscription
-      FROM membre m JOIN utilisateur u ON m.id_util = u.id_util WHERE u.statut = 1
+      FROM membre m JOIN utilisateur u ON m.id_util = u.id_util
     `);
     res.json(rows);
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
@@ -32,6 +32,7 @@ router.put("/membres/:id", authMiddleware, async (req, res) => {
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
+// Supprimer = désactiver (statut 0)
 router.delete("/membres/:id", authMiddleware, async (req, res) => {
   try {
     await pool.query(
@@ -40,7 +41,22 @@ router.delete("/membres/:id", authMiddleware, async (req, res) => {
     );
     await pool.query(
       "INSERT INTO journal_audit (id_util, action, table_affectee, enregistrement_id) VALUES (?, ?, 'membre', ?)",
-      [req.body.id_util_admin || 1, `Suppression membre #${req.params.id}`, req.params.id]
+      [req.body.id_util_admin || 1, `Désactivation membre #${req.params.id}`, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+// Réactiver un membre suspendu
+router.put("/membres/:id/activer", authMiddleware, async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE utilisateur u JOIN membre m ON m.id_util = u.id_util SET u.statut = 1 WHERE m.id_membre = ?",
+      [req.params.id]
+    );
+    await pool.query(
+      "INSERT INTO journal_audit (id_util, action, table_affectee, enregistrement_id) VALUES (?, ?, 'membre', ?)",
+      [req.body.id_util_admin || 1, `Réactivation membre #${req.params.id}`, req.params.id]
     );
     res.json({ success: true });
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
@@ -48,13 +64,25 @@ router.delete("/membres/:id", authMiddleware, async (req, res) => {
 
 router.post("/membres", authMiddleware, async (req, res) => {
   const { nom, prenom, telephone, email, mot_de_passe } = req.body;
+  if (!nom || !prenom) {
+    return res.status(400).json({ error: "Nom et prénom sont requis" });
+  }
+  if (!telephone && !email) {
+    return res.status(400).json({ error: "Téléphone ou email requis" });
+  }
   try {
     const hash = await bcrypt.hash(mot_de_passe || "elitegym2026", 12);
+    // Email optionnel — ne pas générer de faux email
+    const emailVal = email || null;
     const [result]: any = await pool.query(`
       INSERT INTO utilisateur (nom, prenom, email, mot_de_passe, telephone, role)
       VALUES (?, ?, ?, ?, ?, 'membre')
-    `, [nom, prenom, email || `${telephone}@elitegym.dz`, hash, telephone]);
+    `, [nom, prenom, emailVal, hash, telephone || null]);
     await pool.query("INSERT INTO membre (id_util, date_inscription) VALUES (?, CURDATE())", [result.insertId]);
+    await pool.query(
+      "INSERT INTO journal_audit (id_util, action, table_affectee, enregistrement_id) VALUES (?, ?, 'membre', ?)",
+      [1, `Création membre: ${prenom} ${nom}`, result.insertId]
+    );
     res.json({ success: true, id_util: result.insertId });
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Téléphone ou email déjà utilisé" }); }
 });
@@ -63,9 +91,9 @@ router.post("/membres", authMiddleware, async (req, res) => {
 router.get("/coachs", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
-      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email,
+      SELECT u.id_util, u.nom, u.prenom, u.telephone, u.email, u.statut,
              c.id_coach, c.specialite, c.date_embauche
-      FROM coach c JOIN utilisateur u ON c.id_util = u.id_util WHERE u.statut = 1
+      FROM coach c JOIN utilisateur u ON c.id_util = u.id_util
     `);
     res.json(rows);
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
@@ -88,18 +116,34 @@ router.delete("/coachs/:id", authMiddleware, async (req, res) => {
       "UPDATE utilisateur u JOIN coach c ON c.id_util = u.id_util SET u.statut = 0 WHERE c.id_coach = ?",
       [req.params.id]
     );
+    await pool.query(
+      "INSERT INTO journal_audit (id_util, action, table_affectee, enregistrement_id) VALUES (?, ?, 'coach', ?)",
+      [1, `Désactivation coach #${req.params.id}`, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+router.put("/coachs/:id/activer", authMiddleware, async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE utilisateur u JOIN coach c ON c.id_util = u.id_util SET u.statut = 1 WHERE c.id_coach = ?",
+      [req.params.id]
+    );
     res.json({ success: true });
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
 router.post("/coachs", authMiddleware, async (req, res) => {
   const { nom, prenom, telephone, email, specialite, mot_de_passe } = req.body;
+  if (!specialite) return res.status(400).json({ error: "La spécialité est requise" });
   try {
     const hash = await bcrypt.hash(mot_de_passe || "elitegym2026", 12);
+    const emailVal = email || null;
     const [result]: any = await pool.query(`
       INSERT INTO utilisateur (nom, prenom, email, mot_de_passe, telephone, role)
       VALUES (?, ?, ?, ?, ?, 'coach')
-    `, [nom, prenom, email || `${telephone}@elitegym.dz`, hash, telephone]);
+    `, [nom, prenom, emailVal, hash, telephone || null]);
     await pool.query("INSERT INTO coach (id_util, specialite, date_embauche) VALUES (?, ?, CURDATE())", [result.insertId, specialite]);
     res.json({ success: true, id_util: result.insertId });
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Téléphone ou email déjà utilisé" }); }
@@ -124,11 +168,15 @@ router.get("/paiements", authMiddleware, async (req, res) => {
 router.post("/paiements", authMiddleware, async (req, res) => {
   const { id_membre, montant, mode_paiement, motif } = req.body;
   try {
-    await pool.query(
+    const [result]: any = await pool.query(
       "INSERT INTO paiement (id_membre, montant, mode_paiement, motif, statut) VALUES (?, ?, ?, ?, 'valide')",
       [id_membre, montant, mode_paiement || "espèces", motif || "Abonnement"]
     );
-    res.json({ success: true });
+    await pool.query(
+      "INSERT INTO journal_audit (id_util, action, table_affectee, enregistrement_id) VALUES (?, ?, 'paiement', ?)",
+      [1, `Paiement enregistré: ${montant} DA pour membre #${id_membre}`, result.insertId]
+    );
+    res.json({ success: true, id_paiement: result.insertId });
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
@@ -162,6 +210,17 @@ router.put("/formules/:id", authMiddleware, async (req, res) => {
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
+// Activer/désactiver une formule
+router.put("/formules/:id/toggle", authMiddleware, async (req, res) => {
+  try {
+    await pool.query(
+      "UPDATE formule_abonnement SET actif = NOT actif WHERE id_formule = ?",
+      [req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
 router.delete("/formules/:id", authMiddleware, async (req, res) => {
   try {
     await pool.query("UPDATE formule_abonnement SET actif = 0 WHERE id_formule = ?", [req.params.id]);
@@ -179,7 +238,6 @@ router.get("/abonnements", authMiddleware, async (req, res) => {
       JOIN formule_abonnement f ON a.id_formule = f.id_formule
       JOIN membre m ON a.id_membre = m.id_membre
       JOIN utilisateur u ON m.id_util = u.id_util
-      WHERE u.statut = 1
       ORDER BY a.date_debut DESC LIMIT 100
     `);
     res.json(rows);
@@ -215,6 +273,18 @@ router.put("/abonnements/:id", authMiddleware, async (req, res) => {
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
+// Résilier un abonnement
+router.put("/abonnements/:id/resilier", authMiddleware, async (req, res) => {
+  try {
+    await pool.query("UPDATE abonnement SET statut='resilié' WHERE id_abonnement=?", [req.params.id]);
+    await pool.query(
+      "INSERT INTO journal_audit (id_util, action, table_affectee, enregistrement_id) VALUES (?, ?, 'abonnement', ?)",
+      [1, `Résiliation abonnement #${req.params.id}`, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
 // ── ÉQUIPEMENTS ────────────────────────────────────────────
 router.get("/equipements", authMiddleware, async (req, res) => {
   try {
@@ -238,18 +308,11 @@ router.get("/equipements", authMiddleware, async (req, res) => {
 router.post("/equipements", authMiddleware, async (req, res) => {
   const { nom, categorie, etat, quantite, date_acquisition, notes } = req.body;
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS equipement (
-        id_equipement INT AUTO_INCREMENT PRIMARY KEY,
-        nom VARCHAR(100) NOT NULL,
-        categorie VARCHAR(50) DEFAULT 'Autre',
-        etat ENUM('bon','usure','maintenance','hors_service') DEFAULT 'bon',
-        quantite INT DEFAULT 1,
-        date_acquisition DATE,
-        notes TEXT,
-        date_maj TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      )
-    `);
+    await pool.query(`CREATE TABLE IF NOT EXISTS equipement (
+      id_equipement INT AUTO_INCREMENT PRIMARY KEY, nom VARCHAR(100) NOT NULL,
+      categorie VARCHAR(50) DEFAULT 'Autre', etat ENUM('bon','usure','maintenance','hors_service') DEFAULT 'bon',
+      quantite INT DEFAULT 1, date_acquisition DATE, notes TEXT,
+      date_maj TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
     await pool.query(
       "INSERT INTO equipement (nom, categorie, etat, quantite, date_acquisition, notes) VALUES (?, ?, ?, ?, ?, ?)",
       [nom, categorie || "Autre", etat || "bon", quantite || 1, date_acquisition || null, notes || null]
@@ -276,7 +339,22 @@ router.delete("/equipements/:id", authMiddleware, async (req, res) => {
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
-// ── PLANNING ───────────────────────────────────────────────
+// ── PLANNING — COURS ───────────────────────────────────────
+// Tous les cours publiés pour le calendrier admin
+router.get("/cours", authMiddleware, async (req, res) => {
+  try {
+    const [rows]: any = await pool.query(`
+      SELECT c.*, u.nom, u.prenom, co.specialite, co.id_coach
+      FROM cours c
+      JOIN coach co ON c.id_coach = co.id_coach
+      JOIN utilisateur u ON co.id_util = u.id_util
+      WHERE c.statut IN ('publie', 'en_attente')
+      ORDER BY c.date_cours, c.heure_debut
+    `);
+    res.json(rows);
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
 router.get("/cours-en-attente", authMiddleware, async (req, res) => {
   try {
     const [rows]: any = await pool.query(`
@@ -291,6 +369,26 @@ router.get("/cours-en-attente", authMiddleware, async (req, res) => {
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
 
+// Admin crée un cours pour un coach
+router.post("/cours", authMiddleware, async (req, res) => {
+  const { id_coach, type_cours, date_cours, heure_debut, duree_minutes, salle, capacite_max } = req.body;
+  if (!id_coach || !type_cours || !date_cours || !heure_debut || !salle) {
+    return res.status(400).json({ error: "Champs requis manquants" });
+  }
+  try {
+    const cap = capacite_max || 20;
+    const [result]: any = await pool.query(`
+      INSERT INTO cours (id_coach, type_cours, date_cours, heure_debut, duree_minutes, salle, capacite_max, places_restantes, statut)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'publie')
+    `, [id_coach, type_cours, date_cours, heure_debut, duree_minutes || 60, salle, cap, cap]);
+    await pool.query(
+      "INSERT INTO journal_audit (id_util, action, table_affectee, enregistrement_id) VALUES (?, ?, 'cours', ?)",
+      [1, `Cours créé par admin: ${type_cours} le ${date_cours}`, result.insertId]
+    );
+    res.json({ success: true, id_cours: result.insertId });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
 router.put("/cours/:id/approuver", authMiddleware, async (req, res) => {
   try {
     await pool.query("UPDATE cours SET statut = 'publie' WHERE id_cours = ?", [req.params.id]);
@@ -301,6 +399,52 @@ router.put("/cours/:id/approuver", authMiddleware, async (req, res) => {
 router.put("/cours/:id/rejeter", authMiddleware, async (req, res) => {
   try {
     await pool.query("UPDATE cours SET statut = 'annule' WHERE id_cours = ?", [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+// ── NOTIFICATIONS ──────────────────────────────────────────
+router.get("/notifications", authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS notification (
+      id_notif INT AUTO_INCREMENT PRIMARY KEY,
+      id_util INT NOT NULL,
+      titre VARCHAR(200) NOT NULL,
+      message TEXT,
+      type VARCHAR(50) DEFAULT 'info',
+      lu TINYINT DEFAULT 0,
+      date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (id_util) REFERENCES utilisateur(id_util) ON DELETE CASCADE
+    )`);
+    const { id_util } = req.query;
+    if (!id_util) return res.json([]);
+    const [rows]: any = await pool.query(
+      "SELECT * FROM notification WHERE id_util = ? ORDER BY date_creation DESC LIMIT 50",
+      [id_util]
+    );
+    res.json(rows);
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+router.put("/notifications/:id/lu", authMiddleware, async (req, res) => {
+  try {
+    await pool.query("UPDATE notification SET lu = 1 WHERE id_notif = ?", [req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
+});
+
+router.post("/notifications", authMiddleware, async (req, res) => {
+  const { id_util, titre, message, type } = req.body;
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS notification (
+      id_notif INT AUTO_INCREMENT PRIMARY KEY, id_util INT NOT NULL,
+      titre VARCHAR(200) NOT NULL, message TEXT, type VARCHAR(50) DEFAULT 'info',
+      lu TINYINT DEFAULT 0, date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (id_util) REFERENCES utilisateur(id_util) ON DELETE CASCADE)`);
+    await pool.query(
+      "INSERT INTO notification (id_util, titre, message, type) VALUES (?, ?, ?, ?)",
+      [id_util, titre, message || null, type || "info"]
+    );
     res.json({ success: true });
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
@@ -349,7 +493,7 @@ router.post("/backup", authMiddleware, async (req, res) => {
     const [[m]]: any = await pool.query("SELECT COUNT(*) as n FROM membre");
     const [[c]]: any = await pool.query("SELECT COUNT(*) as n FROM coach");
     const [[p]]: any = await pool.query("SELECT COUNT(*) as n FROM paiement");
-    const [[a]]: any = await pool.query("SELECT COUNT(*) as n FROM abonnement");
+    const [[ab]]: any = await pool.query("SELECT COUNT(*) as n FROM abonnement");
     await pool.query(
       "INSERT INTO journal_audit (id_util, action, table_affectee) VALUES (?, ?, 'systeme')",
       [req.body.id_util || 1, `Sauvegarde système effectuée le ${ts}`]
@@ -357,7 +501,7 @@ router.post("/backup", authMiddleware, async (req, res) => {
     res.json({
       success: true,
       timestamp: ts,
-      stats: { membres: m.n, coachs: c.n, paiements: p.n, abonnements: a.n },
+      stats: { membres: m.n, coachs: c.n, paiements: p.n, abonnements: ab.n },
     });
   } catch (err: any) { req.log.error(err); res.status(500).json({ error: "Erreur serveur" }); }
 });
