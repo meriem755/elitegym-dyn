@@ -47,26 +47,22 @@ router.get("/presence/:id_membre", authMiddleware, async (req, res) => {
       ORDER BY c.date_cours DESC, c.heure_debut DESC
     `, [req.params.id_membre]);
 
-    // Stats globales
     const total_seances = rows.length;
     const total_minutes = rows.reduce((acc: number, r: any) => acc + (r.duree_minutes || 0), 0);
     const total_heures = Math.round(total_minutes / 60 * 10) / 10;
 
-    // Cours le plus pratiqué
     const compteur: Record<string, number> = {};
     rows.forEach((r: any) => {
       compteur[r.type_cours] = (compteur[r.type_cours] || 0) + 1;
     });
     const cours_favori = Object.entries(compteur).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
-    // Séances ce mois
     const now = new Date();
     const seances_mois = rows.filter((r: any) => {
       const d = new Date(r.date_cours);
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     }).length;
 
-    // Activité par semaine (8 dernières semaines)
     const semaines: Record<string, number> = {};
     for (let i = 0; i < 8; i++) {
       const d = new Date();
@@ -107,26 +103,77 @@ function getWeekNumber(d: Date): number {
 router.post("/", authMiddleware, async (req, res) => {
   const { id_membre, id_cours } = req.body;
   try {
+    // Vérifier que le cours existe et est publié
     const [cours]: any = await pool.query(
       "SELECT * FROM cours WHERE id_cours = ? AND statut = 'publie'",
       [id_cours]
     );
     if (!cours.length) return res.status(404).json({ error: "Cours non trouvé" });
-    if (cours[0].places_restantes <= 0)
-      return res.status(400).json({ error: "Plus de places disponibles" });
 
+    // ✅ Calculer les places restantes dynamiquement depuis les réservations
+    const [countRows]: any = await pool.query(
+      "SELECT COUNT(*) as nb FROM reservation WHERE id_cours = ? AND statut = 'confirmee'",
+      [id_cours]
+    );
+    const inscrits = countRows[0].nb;
+    const placesRestantes = cours[0].capacite_max - inscrits;
+
+    if (placesRestantes <= 0) {
+      // Proposer liste d'attente
+      const [existingAttente]: any = await pool.query(
+        "SELECT * FROM liste_attente WHERE id_membre = ? AND id_cours = ?",
+        [id_membre, id_cours]
+      );
+      if (existingAttente.length) {
+        return res.status(400).json({ error: "Vous êtes déjà en liste d'attente" });
+      }
+      const [posRow]: any = await pool.query(
+        "SELECT COUNT(*) as pos FROM liste_attente WHERE id_cours = ?",
+        [id_cours]
+      );
+      const position = posRow[0].pos + 1;
+      await pool.query(
+        "INSERT INTO liste_attente (id_membre, id_cours, position) VALUES (?, ?, ?)",
+        [id_membre, id_cours, position]
+      );
+      return res.status(200).json({ 
+        success: true, 
+        liste_attente: true, 
+        position,
+        message: `Cours complet. Vous êtes en liste d'attente (position ${position}).`
+      });
+    }
+
+    // Vérifier si déjà inscrit
     const [existing]: any = await pool.query(
       "SELECT * FROM reservation WHERE id_membre = ? AND id_cours = ?",
       [id_membre, id_cours]
     );
-    if (existing.length) return res.status(400).json({ error: "Déjà inscrit à ce cours" });
+    if (existing.length) {
+      if (existing[0].statut === 'annulee') {
+        // Réactiver la réservation annulée
+        await pool.query(
+          "UPDATE reservation SET statut = 'confirmee' WHERE id_membre = ? AND id_cours = ?",
+          [id_membre, id_cours]
+        );
+        // Mettre à jour places_restantes en base aussi pour cohérence
+        await pool.query(
+          "UPDATE cours SET places_restantes = GREATEST(0, places_restantes - 1) WHERE id_cours = ?",
+          [id_cours]
+        );
+        return res.json({ success: true });
+      }
+      return res.status(400).json({ error: "Déjà inscrit à ce cours" });
+    }
 
+    // Créer la réservation
     await pool.query(
       "INSERT INTO reservation (id_membre, id_cours, statut) VALUES (?, ?, 'confirmee')",
       [id_membre, id_cours]
     );
+    // Mettre à jour places_restantes en base pour cohérence
     await pool.query(
-      "UPDATE cours SET places_restantes = places_restantes - 1 WHERE id_cours = ?",
+      "UPDATE cours SET places_restantes = GREATEST(0, places_restantes - 1) WHERE id_cours = ?",
       [id_cours]
     );
     res.json({ success: true });
@@ -158,10 +205,41 @@ router.put("/:id/annuler", authMiddleware, async (req, res) => {
       "UPDATE reservation SET statut = 'annulee' WHERE id_reservation = ?",
       [req.params.id]
     );
+    // Remettre la place + vérifier liste d'attente
     await pool.query(
       "UPDATE cours SET places_restantes = places_restantes + 1 WHERE id_cours = ?",
       [res_.id_cours]
     );
+
+    // ✅ Promouvoir le premier en liste d'attente
+    const [attente]: any = await pool.query(
+      "SELECT * FROM liste_attente WHERE id_cours = ? ORDER BY position ASC LIMIT 1",
+      [res_.id_cours]
+    );
+    if (attente.length) {
+      const premier = attente[0];
+      // Créer réservation pour lui
+      await pool.query(
+        "INSERT INTO reservation (id_membre, id_cours, statut) VALUES (?, ?, 'confirmee') ON DUPLICATE KEY UPDATE statut = 'confirmee'",
+        [premier.id_membre, res_.id_cours]
+      );
+      // Décrémenter places
+      await pool.query(
+        "UPDATE cours SET places_restantes = GREATEST(0, places_restantes - 1) WHERE id_cours = ?",
+        [res_.id_cours]
+      );
+      // Retirer de la liste d'attente
+      await pool.query(
+        "DELETE FROM liste_attente WHERE id_attente = ?",
+        [premier.id_attente]
+      );
+      // Réorganiser les positions
+      await pool.query(
+        "UPDATE liste_attente SET position = position - 1 WHERE id_cours = ? AND position > 1",
+        [res_.id_cours]
+      );
+    }
+
     res.json({ success: true });
   } catch (err: any) {
     req.log.error(err);

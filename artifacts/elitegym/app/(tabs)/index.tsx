@@ -8,7 +8,6 @@ import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import CoursCard from "@/components/CoursCard";
-import NotifBanner from "@/components/NotifBanner";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
@@ -25,65 +24,223 @@ export default function AccueilScreen() {
   const [cours, setCours] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [abonnement, setAbonnement] = useState<any>(null);
-  const [nouveauxCours, setNouveauxCours] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Bannières dismissées
-  const [hideExpiryBanner, setHideExpiryBanner] = useState(false);
-  const [hideNewCoursBanner, setHideNewCoursBanner] = useState(false);
-  const [hideScheduleBanner, setHideScheduleBanner] = useState(false);
+  // 🔥 Helper: normaliser date YYYY-MM-DD
+  const normalizeDate = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return "";
+    return dateStr.slice(0, 10);
+  };
+
+  // 🔥 Helper: normaliser heure HH:MM
+  const normalizeTime = (timeStr: string | null | undefined): string => {
+    if (!timeStr) return "";
+    return timeStr.slice(0, 5);
+  };
 
   const load = async () => {
     try {
       const c = await api.get("/cours/week");
-      setCours(c.slice(0, 5));
-
-      // Compter les cours ajoutés dans les dernières 24h
-      const since = Date.now() - 24 * 60 * 60 * 1000;
-      const recents = c.filter((cr: any) => {
-        const created = new Date(cr.date_creation || cr.date_cours).getTime();
-        return created > since;
+      
+      // 🔥 Dédupliquer les cours (même logique que Planning)
+      const makeUniqueKey = (cours: any) => {
+        return `${normalizeDate(cours.date_cours)}|${normalizeTime(cours.heure_debut)}|${cours.salle || ''}|${cours.id_coach || ''}`;
+      };
+      
+      const seenKeys = new Set<string>();
+      const coursUniques = c.filter((cours: any) => {
+        const key = makeUniqueKey(cours);
+        if (seenKeys.has(key)) return false;
+        seenKeys.add(key);
+        return true;
       });
-      setNouveauxCours(recents.length);
+      
+      // 🔥 Ajouter reservationKey pour vérification rapide
+      const coursAvecKey = coursUniques.slice(0, 5).map((cours: any) => ({
+        ...cours,
+        reservationKey: user?.id_membre ? `${cours.id_cours}_${user.id_membre}` : null,
+        dateNormalized: normalizeDate(cours.date_cours),
+        timeNormalized: normalizeTime(cours.heure_debut)
+      }));
+      
+      setCours(coursAvecKey);
 
       if (user?.id_membre) {
         const [r, a] = await Promise.all([
           api.get(`/reservations/membre/${user.id_membre}`),
           api.get(`/abonnements/membre/${user.id_membre}`),
         ]);
+        
+        // 🔥 Créer un Set des réservations confirmées
+        const confirmedReservations = new Set(
+          r
+            .filter((res: any) => res.statut === "confirmee")
+            .map((res: any) => `${res.id_cours}_${user!.id_membre}`)
+        );
+        
+        (window as any).__confirmedReservationsAccueil = confirmedReservations;
         setReservations(r);
+        
         const actif = a.find((ab: any) => ab.statut === "actif");
         setAbonnement(actif || null);
       }
-    } catch {}
+    } catch (e) {
+      console.error("🔴 [ACCUEIL] Erreur load:", e);
+    }
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
-  const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
-
-  const isReserved = (id_cours: number) =>
-    reservations.some((r: any) => r.id_cours === id_cours && r.statut === "confirmee");
-
-  const handleReserver = async (id_cours: number) => {
-    if (!user?.id_membre) return;
-    try {
-      await api.post("/reservations", { id_membre: user.id_membre, id_cours });
-      Alert.alert("Réservé ✓", "Votre place est confirmée !");
-      load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
+  
+  const onRefresh = async () => { 
+    setRefreshing(true); 
+    await load(); 
+    setRefreshing(false); 
   };
+
+  // 🔥 Vérifier si réservé en utilisant le Set
+  const isReserved = (cours: any): boolean => {
+    if (!user?.id_membre || !cours.reservationKey) return false;
+    const confirmedSet = (window as any).__confirmedReservationsAccueil as Set<string> | undefined;
+    return confirmedSet?.has(cours.reservationKey) || false;
+  };
+
+  // 🔥 Trouver l'ID de réservation pour annuler
+  const getReservationId = (cours: any): number | null => {
+    if (!user?.id_membre) return null;
+    
+    const reservation = reservations.find(
+      (r: any) => 
+        r.id_cours === cours.id_cours && 
+        r.id_membre === user.id_membre && 
+        r.statut === "confirmee"
+    );
+    
+    return reservation?.id_reservation || null;
+  };
+
+  // 🔥 Vérifier si annulation possible (48h avant)
+  const canCancel = (dateCours: string, heureDebut: string): { allowed: boolean; hoursLeft: number } => {
+    try {
+      const dateNorm = normalizeDate(dateCours);
+      const timeNorm = normalizeTime(heureDebut);
+      
+      if (!dateNorm || !timeNorm) return { allowed: false, hoursLeft: 0 };
+      
+      const coursDateTime = new Date(`${dateNorm}T${timeNorm}`);
+      const now = new Date();
+      const diffMs = coursDateTime.getTime() - now.getTime();
+      const hoursLeft = Math.floor(diffMs / (1000 * 60 * 60));
+      
+      return { allowed: hoursLeft >= 48, hoursLeft };
+    } catch (e) {
+      return { allowed: false, hoursLeft: 0 };
+    }
+  };
+
+  const handleReserver = async (cours: any) => {
+    if (!user?.id_membre) {
+      Alert.alert("Erreur", "Vous devez être connecté");
+      return;
+    }
+    
+    if (isReserved(cours)) {
+      Alert.alert("Déjà réservé", "Vous avez déjà une place pour ce cours");
+      return;
+    }
+    
+    try {
+      await api.post("/reservations", { 
+        id_membre: user.id_membre,
+        id_cours: cours.id_cours,
+        id_util: user.id
+      });
+      
+      Alert.alert("Réservé ✓", "Votre place est confirmée !");
+      await load();
+    } catch (e: any) { 
+      console.error("❌ Erreur réservation:", e);
+      
+      if (e.message?.includes("Déjà inscrit")) {
+        Alert.alert("Déjà réservé", "Vous avez déjà une place pour ce cours");
+        await load();
+      } else {
+        Alert.alert("Erreur", e.message || "Impossible de réserver");
+      }
+    }
+  };
+
+  // 🔥 Nouvelle fonction d'annulation
+  const handleAnnuler = async (cours: any) => {
+  console.log("🔴 handleAnnuler appelé pour:", cours.id_cours);
+  
+  const reservationId = getReservationId(cours);
+  
+  if (!reservationId) {
+    Alert.alert("Erreur", "Aucune réservation trouvée pour ce cours");
+    return;
+  }
+
+  const { allowed, hoursLeft } = canCancel(cours.date_cours, cours.heure_debut);
+  
+  if (!allowed) {
+    Alert.alert(
+      "Annulation impossible",
+      `L'annulation doit se faire au moins 48h avant le cours.\nIl reste ${hoursLeft}h avant le début.`,
+      [{ text: "OK" }]
+    );
+    return;
+  }
+
+  Alert.alert(
+    "Annuler la réservation",
+    "Êtes-vous sûr de vouloir annuler ?",
+    [
+      { text: "Non", style: "cancel" },
+      {
+        text: "Oui, annuler",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            console.log("🗑️ Annulation réservation ID:", reservationId);
+            
+            // 1. Appel API
+            await api.put(`/reservations/${reservationId}/annuler`);
+            
+            // 🔥 2. Mettre à jour le Set IMMÉDIATEMENT (sans attendre load())
+            const confirmedSet = (window as any).__confirmedReservations as Set<string> | undefined;
+            if (confirmedSet && cours.reservationKey) {
+              confirmedSet.delete(cours.reservationKey);
+              console.log("✅ Réservation supprimée du Set:", cours.reservationKey);
+            }
+            
+            // 🔥 3. Mettre à jour le state reservations pour forcer re-render
+            setReservations(prev => 
+              prev.filter((r: any) => r.id_reservation !== reservationId)
+            );
+            
+            // 4. Recharger les données en background
+            await load();
+            
+            Alert.alert("Succès ✓", "Réservation annulée");
+            
+          } catch (e: any) {
+            console.error("❌ Erreur annulation:", e);
+            Alert.alert("Erreur", e.message || "Impossible d'annuler");
+          }
+        },
+      },
+    ]
+  );
+};
 
   const joursRestants = abonnement ? daysUntil(abonnement.date_fin) : null;
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={[
-        styles.container,
-        { paddingTop: Platform.OS === "web" ? 90 : insets.top + 16, paddingBottom: 100 },
-      ]}
+      contentContainerStyle={[styles.container, { paddingTop: 16, paddingBottom: 100 }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       {/* Hero */}
@@ -98,48 +255,6 @@ export default function AccueilScreen() {
           <Text style={[styles.badgeText, { color: colors.primary }]}>{user?.role}</Text>
         </View>
       </View>
-
-      {/* === BANNIÈRES DE NOTIFICATIONS === */}
-
-      {/* Abonnement expirant bientôt */}
-      {!hideExpiryBanner && user?.role === "membre" && joursRestants !== null && joursRestants <= 7 && joursRestants > 0 && (
-        <NotifBanner
-          type="warning"
-          message={`Votre abonnement "${abonnement.nom}" expire dans ${joursRestants} jour${joursRestants > 1 ? "s" : ""}. Pensez à le renouveler !`}
-          onDismiss={() => setHideExpiryBanner(true)}
-          action={{ label: "Renouveler", onPress: () => router.push("/(tabs)/abonnements") }}
-        />
-      )}
-
-      {/* Abonnement expiré */}
-      {!hideExpiryBanner && user?.role === "membre" && joursRestants !== null && joursRestants <= 0 && (
-        <NotifBanner
-          type="danger"
-          message="Votre abonnement a expiré. Renouvelez pour continuer à profiter de la salle."
-          onDismiss={() => setHideExpiryBanner(true)}
-          action={{ label: "Renouveler", onPress: () => router.push("/(tabs)/abonnements") }}
-        />
-      )}
-
-      {/* Nouveaux cours cette semaine */}
-      {!hideNewCoursBanner && nouveauxCours > 0 && (
-        <NotifBanner
-          type="info"
-          message={`🆕 ${nouveauxCours} nouveau${nouveauxCours > 1 ? "x" : ""} cours ajouté${nouveauxCours > 1 ? "s" : ""} cette semaine. Réservez votre place !`}
-          onDismiss={() => setHideNewCoursBanner(true)}
-          action={{ label: "Voir", onPress: () => router.push("/(tabs)/planning") }}
-        />
-      )}
-
-      {/* Planning de la semaine disponible */}
-      {!hideScheduleBanner && cours.length > 0 && (
-        <NotifBanner
-          type="success"
-          message={`📅 Le planning de la semaine est disponible — ${cours.length} cours programmés. Consultez les horaires !`}
-          onDismiss={() => setHideScheduleBanner(true)}
-          action={{ label: "Planning", onPress: () => router.push("/(tabs)/planning") }}
-        />
-      )}
 
       {/* Stats */}
       <View style={styles.statsRow}>
@@ -218,15 +333,27 @@ export default function AccueilScreen() {
           <Text style={{ color: colors.mutedForeground }}>Aucun cours cette semaine</Text>
         </View>
       ) : (
-        cours.map((c: any) => (
-          <CoursCard
-            key={c.id_cours}
-            cours={c}
-            reserved={isReserved(c.id_cours)}
-            showActions={user?.role === "membre"}
-            onReserver={() => handleReserver(c.id_cours)}
-          />
-        ))
+        cours.map((c: any, index: number) => {
+          const reserved = isReserved(c);
+          const { allowed, hoursLeft } = canCancel(c.date_cours, c.heure_debut);
+          
+          // 🔥 Clé unique pour React
+          const reactKey = `${c.id_cours}-${c.dateNormalized}-${c.timeNormalized}-${index}`;
+          
+          return (
+            <CoursCard
+              key={reactKey}
+              cours={c}
+              reserved={reserved}
+              canCancel={allowed}        // ← NOUVEAU
+              hoursLeft={hoursLeft}      // ← NOUVEAU
+              waitlistCount={c.waitlist_count || 0}
+              showActions={user?.role === "membre"}
+              onReserver={() => handleReserver(c)}
+              onAnnuler={() => handleAnnuler(c)}  // ← NOUVEAU
+            />
+          );
+        })
       )}
     </ScrollView>
   );

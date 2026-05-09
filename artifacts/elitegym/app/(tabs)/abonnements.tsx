@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Platform, Alert, Modal, TouchableOpacity, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Platform, Alert, Modal, TouchableOpacity, ActivityIndicator, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
@@ -29,11 +28,10 @@ h1{color:#E63946;border-bottom:2px solid #E63946;padding-bottom:10px}
 </body></html>`;
 }
 
-const MODES_PAIEMENT = ["espèces","CIB","BaridiMob","virement","chèque"];
+const MODES_PAIEMENT = ["espèces","CIB / Carte bancaire","Edahabia","BaridiMob","virement","chèque"];
 
 export default function AbonnementsScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [paiements, setPaiements] = useState<any[]>([]);
   const [abonnement, setAbonnement] = useState<any>(null);
@@ -44,6 +42,12 @@ export default function AbonnementsScreen() {
   const [selectedFormule, setSelectedFormule] = useState<any>(null);
   const [selectedMode, setSelectedMode] = useState("espèces");
   const [renouvLoading, setRenouvLoading] = useState(false);
+  const [referenceText, setReferenceText] = useState("");
+  // Champs carte bancaire
+  const [cardNum, setCardNum] = useState("");
+  const [cardName, setCardName] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
 
   const load = async () => {
     if (!user?.id_membre) return;
@@ -78,11 +82,12 @@ export default function AbonnementsScreen() {
         id_formule: selectedFormule.id_formule,
         mode_paiement: selectedMode,
         montant: selectedFormule.tarif,
+        reference: referenceText || undefined,
       });
       Alert.alert(
         "Demande envoyée ✓",
         `Votre demande de renouvellement (${selectedFormule.nom} — ${Number(selectedFormule.tarif).toLocaleString()} DA) a été enregistrée.\n\nL'admin validera le paiement.`,
-        [{ text: "OK", onPress: () => { setShowRenouveler(false); load(); } }]
+        [{ text: "OK", onPress: () => { setShowRenouveler(false); setReferenceText(""); load(); } }]
       );
     } catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setRenouvLoading(false); }
@@ -109,11 +114,6 @@ export default function AbonnementsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={[ab.topBar, { backgroundColor: colors.secondary, paddingTop: Platform.OS === "web" ? 20 : insets.top + 8 }]}>
-        <Feather name="credit-card" size={20} color="#fff" />
-        <Text style={ab.topBarTitle}>Paiements & Abonnement</Text>
-      </View>
-
       <ScrollView contentContainerStyle={[ab.content, { paddingBottom: 90 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {loading ? (
@@ -263,6 +263,119 @@ export default function AbonnementsScreen() {
               ))}
             </View>
 
+            {/* Formulaire carte bancaire / Edahabia */}
+            {["CIB / Carte bancaire","Edahabia"].includes(selectedMode) && (
+              <View style={{ gap: 10, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: colors.primary + "40", backgroundColor: colors.primary + "06" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                  <Feather name="credit-card" size={16} color={colors.primary} />
+                  <Text style={[ab.fieldLabel, { color: colors.primary, marginBottom: 0 }]}>
+                    {selectedMode === "Edahabia" ? "Détails Edahabia" : "Détails carte bancaire (CIB)"}
+                  </Text>
+                </View>
+
+                {/* Numéro de carte */}
+                <View style={{ gap: 4 }}>
+                  <Text style={[ab.fieldLabel, { color: colors.foreground }]}>Numéro de carte *</Text>
+                  <View style={[ab.refInput, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                    <Feather name="credit-card" size={14} color={colors.mutedForeground} />
+                    <TextInput
+                      style={{ flex: 1, color: colors.foreground, fontSize: 13, letterSpacing: 1 }}
+                      placeholder="1234 5678 9012 3456"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={cardNum}
+                      onChangeText={(v) => {
+                        const digits = v.replace(/\D/g, "").slice(0, 16);
+                        setCardNum(digits.replace(/(.{4})/g, "$1 ").trim());
+                      }}
+                      keyboardType="numeric"
+                      maxLength={19}
+                    />
+                  </View>
+                </View>
+
+                {/* Nom sur la carte */}
+                <View style={{ gap: 4 }}>
+                  <Text style={[ab.fieldLabel, { color: colors.foreground }]}>Nom sur la carte *</Text>
+                  <View style={[ab.refInput, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                    <Feather name="user" size={14} color={colors.mutedForeground} />
+                    <TextInput
+                      style={{ flex: 1, color: colors.foreground, fontSize: 13 }}
+                      placeholder="PRÉNOM NOM"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={cardName}
+                      onChangeText={(v) => setCardName(v.toUpperCase())}
+                      autoCapitalize="characters"
+                    />
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  {/* Date d'expiration */}
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Text style={[ab.fieldLabel, { color: colors.foreground }]}>Expiration *</Text>
+                    <View style={[ab.refInput, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                      <Feather name="calendar" size={14} color={colors.mutedForeground} />
+                      <TextInput
+                        style={{ flex: 1, color: colors.foreground, fontSize: 13 }}
+                        placeholder="MM/AA"
+                        placeholderTextColor={colors.mutedForeground}
+                        value={cardExpiry}
+                        onChangeText={(v) => {
+                          const digits = v.replace(/\D/g, "").slice(0, 4);
+                          if (digits.length >= 3) setCardExpiry(digits.slice(0,2) + "/" + digits.slice(2));
+                          else setCardExpiry(digits);
+                        }}
+                        keyboardType="numeric"
+                        maxLength={5}
+                      />
+                    </View>
+                  </View>
+
+                  {/* CVV */}
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Text style={[ab.fieldLabel, { color: colors.foreground }]}>CVV *</Text>
+                    <View style={[ab.refInput, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                      <Feather name="lock" size={14} color={colors.mutedForeground} />
+                      <TextInput
+                        style={{ flex: 1, color: colors.foreground, fontSize: 13 }}
+                        placeholder="123"
+                        placeholderTextColor={colors.mutedForeground}
+                        value={cardCvv}
+                        onChangeText={(v) => setCardCvv(v.replace(/\D/g,"").slice(0,3))}
+                        keyboardType="numeric"
+                        secureTextEntry
+                        maxLength={3}
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingTop: 4 }}>
+                  <Feather name="lock" size={12} color="#10b981" />
+                  <Text style={{ fontSize: 11, color: "#10b981" }}>Paiement sécurisé — données chiffrées</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Référence pour virement / chèque / BaridiMob */}
+            {["BaridiMob","virement","chèque"].includes(selectedMode) && (
+              <View style={{ gap: 4 }}>
+                <Text style={[ab.fieldLabel, { color: colors.foreground }]}>
+                  {selectedMode === "chèque" ? "N° de chèque (optionnel)" : selectedMode === "virement" ? "Référence virement (optionnel)" : "N° de transaction BaridiMob (optionnel)"}
+                </Text>
+                <View style={[ab.refInput, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                  <Feather name="hash" size={14} color={colors.mutedForeground} />
+                  <TextInput
+                    style={{ flex: 1, color: colors.foreground, fontSize: 13 }}
+                    placeholder="Numéro de référence..."
+                    placeholderTextColor={colors.mutedForeground}
+                    value={referenceText}
+                    onChangeText={setReferenceText}
+                  />
+                </View>
+              </View>
+            )}
+
             {/* Récap */}
             {selectedFormule && (
               <View style={[ab.recapBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
@@ -300,6 +413,7 @@ export default function AbonnementsScreen() {
 }
 
 const ab = StyleSheet.create({
+  refInput: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1 },
   topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingBottom: 14 },
   topBarTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
   content: { padding: 16, gap: 10 },

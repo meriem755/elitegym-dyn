@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+// src/context/AuthContext.tsx
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 interface User {
@@ -27,59 +28,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Charger l'utilisateur au démarrage
   useEffect(() => {
-    const loadUser = async () => {
+    const init = async () => {
       try {
         const val = await AsyncStorage.getItem("elitegym_user");
         if (val) {
-          setUser(JSON.parse(val));
+          const parsed = JSON.parse(val);
+          setUser(parsed);
         }
-      } catch (error) {
-        console.error("❌ Erreur chargement user:", error);
+      } catch (e) {
+        console.error("Auth init error:", e);
       } finally {
         setIsLoading(false);
       }
     };
-    loadUser();
+    init();
   }, []);
 
-  // ✅ Fonction de connexion (MANQUANTE - À AJOUTER)
   const login = async (data: any) => {
     const userData: User = {
-      id: data.id,
-      nom: data.nom,
-      prenom: data.prenom,
-      role: data.role,
-      token: data.token,
-      email: data.email,
-      telephone: data.telephone,
-      id_membre: data.id_membre,
-      id_coach: data.id_coach,
+      id: data.id, nom: data.nom, prenom: data.prenom, role: data.role,
+      token: data.token, email: data.email, telephone: data.telephone,
+      id_membre: data.id_membre, id_coach: data.id_coach,
     };
     await AsyncStorage.setItem("elitegym_user", JSON.stringify(userData));
     setUser(userData);
   };
 
-  // Fonction de mise à jour du profil
   const updateUser = async (patch: Partial<User>) => {
+    if (!user) return;
     const updated = { ...user, ...patch } as User;
     await AsyncStorage.setItem("elitegym_user", JSON.stringify(updated));
     setUser(updated);
   };
 
-  // Fonction de déconnexion
-  const logout = async () => {
-    console.log("🧹 [AuthContext] Début logout");
+  const logout = useCallback(async () => {
+    console.log("🔐 Logout triggered");
     try {
-      await AsyncStorage.removeItem("elitegym_user");
-      console.log("🗑️ [AuthContext] elitegym_user supprimé");
+      await AsyncStorage.multiRemove(["elitegym_user", "token", "elitegym_token"]);
+      console.log("🗑️ Storage cleared");
+    } catch (e) {
+      console.error("❌ Logout storage error:", e);
+    } finally {
       setUser(null);
-      console.log("👤 [AuthContext] user mis à null");
-    } catch (error) {
-      console.error("❌ [AuthContext] Erreur logout:", error);
+      console.log("✅ User state set to null");
     }
-  };
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, login, logout, updateUser, isLoading }}>
@@ -90,6 +84,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be inside AuthProvider");
+  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
 }

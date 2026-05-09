@@ -1,9 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Platform, Alert, Modal, TouchableOpacity, TextInput } from "react-native";
+import { 
+  View, Text, StyleSheet, ScrollView, RefreshControl, 
+  Platform, Alert, Modal, TouchableOpacity, TextInput 
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { api } from "@/lib/api";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/context/AuthContext"; // 👈 Vérifie ce chemin
+import { useNotifs } from "@/lib/notifications"; // ⚠️ Vérifie que c'est bien ton NotifContext
+import { useRouter } from "expo-router"; // 👈 IMPORT ROUTER
+
 import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
@@ -49,15 +55,22 @@ function SearchBar({ value, onChange, placeholder }: { value: string; onChange: 
 export default function CoachDashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+  
+  // 👇 CORRECTION PRINCIPALE : Bien déstructurer isLoading + user + logout
+  const { user, logout, isLoading } = useAuth(); 
+  const router = useRouter(); // 👈 Hook router
+  const { notifs: wsNotifs, unread: unreadNotifs, markAllRead } = useNotifs();
+  
   const [tab, setTab] = useState<Tab>("cours");
+  
+  // ⚠️ NE PAS FAIRE : if (!user) return null; ici → ça bloque les useEffect
+  // On gère l'affichage loading + redirection plus bas
 
   const [cours, setCours] = useState<any[]>([]);
   const [membres, setMembres] = useState<any[]>([]);
   const [suivis, setSuivis] = useState<any[]>([]);
   const [programmes, setProgrammes] = useState<any[]>([]);
   const [avisData, setAvisData] = useState<{ avis: any[]; moyennes: any[] }>({ avis: [], moyennes: [] });
-  const [notifications, setNotifications] = useState<any[]>([]);
   const [loadingAvis, setLoadingAvis] = useState(false);
 
   // Recherche
@@ -95,14 +108,12 @@ export default function CoachDashboard() {
   const load = async () => {
     if (!user?.id_coach) return;
     try {
-      const [c, m, notifs] = await Promise.all([
+      const [c, m] = await Promise.all([
         api.get(`/cours/coach/${user.id_coach}`),
         api.get(`/coachs/${user.id_coach}/membres`),
-        api.get(`/admin/notifications?id_util=${user?.id}`).catch(() => []),
       ]);
       setCours(c);
       setMembres(m);
-      setNotifications(notifs);
     } catch {}
   };
 
@@ -143,6 +154,13 @@ export default function CoachDashboard() {
     if (tab === "avis") await loadAvis();
     setRefreshing(false);
   };
+
+  // 👇 PROTECTION DE ROUTE : Redirige vers login si pas authentifié
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.replace("/login");
+    }
+  }, [user, isLoading, router]);
 
   // Filtered
   const filteredMembres = membres.filter(m =>
@@ -267,6 +285,40 @@ export default function CoachDashboard() {
     finally { setLoadingParam(false); }
   };
 
+  const handleLogout = async () => {
+  console.log("🔴 [LOGOUT] handleLogout called, platform:", Platform.OS);
+  
+  if (Platform.OS === "web") {
+    // Sur web, Alert.alert ne marche pas → utiliser window.confirm
+    const confirmed = window.confirm("Êtes-vous sûr de vouloir vous déconnecter ?");
+    console.log("🔴 [LOGOUT] web confirm result:", confirmed);
+    if (!confirmed) return;
+    
+    console.log("🔴 [LOGOUT] Calling logout()...");
+    await logout();
+    console.log("🔴 [LOGOUT] logout() done, redirecting...");
+    window.location.href = "/login";
+    return;
+  }
+
+  // Mobile uniquement
+  Alert.alert(
+    "Déconnexion",
+    "Êtes-vous sûr de vouloir vous déconnecter ?",
+    [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Se déconnecter",
+        style: "destructive",
+        onPress: async () => {
+          console.log("🔴 [LOGOUT] Mobile confirmed");
+          await logout();
+          router.replace("/login");
+        },
+      },
+    ]
+  );
+};
   const TABS: { key: Tab; label: string; icon: string }[] = [
     { key: "cours",      label: "Planning",  icon: "calendar" },
     { key: "presences",  label: "Présences", icon: "check-circle" },
@@ -283,7 +335,19 @@ export default function CoachDashboard() {
     avisParCours[a.id_cours].push(a);
   });
 
-  const unreadNotifs = notifications.filter((n: any) => !n.lu).length;
+  // 👇 Affichage loading pendant l'initialisation de l'auth
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
+        <Text style={{ color: colors.foreground }}>Chargement...</Text>
+      </View>
+    );
+  }
+
+  // 👇 Si pas de user après chargement, on n'affiche rien (le useEffect redirigera)
+  if (!user) {
+    return null;
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -296,32 +360,16 @@ export default function CoachDashboard() {
           <Text style={cs.headerTitle}>{user?.prenom} {user?.nom}</Text>
           <Text style={cs.headerSub}>Coach</Text>
         </View>
-        <TouchableOpacity onPress={() => setShowNotifs(true)} style={{ marginRight: 14, position: "relative" }}>
+        <TouchableOpacity onPress={() => { setShowNotifs(true); markAllRead(); }} style={{ marginRight: 14, position: "relative" }}>
           <Feather name="bell" size={22} color="rgba(255,255,255,0.9)" />
           {unreadNotifs > 0 && (
             <View style={cs.notifBadge}><Text style={cs.notifBadgeText}>{unreadNotifs}</Text></View>
           )}
         </TouchableOpacity>
-        <TouchableOpacity onPress={logout}>
-          <Feather name="log-out" size={22} color="rgba(255,255,255,0.8)" />
-        </TouchableOpacity>
       </View>
 
-      {/* Tab bar scrollable (top) */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={[cs.tabBarScroll, { backgroundColor: colors.card, borderBottomColor: colors.border }]}
-        contentContainerStyle={cs.tabBarContent}>
-        {TABS.map((t) => (
-          <TouchableOpacity key={t.key} onPress={() => setTab(t.key)}
-            style={[cs.tabBtn, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}>
-            <Feather name={t.icon as any} size={14} color={tab === t.key ? colors.primary : colors.mutedForeground} />
-            <Text style={[cs.tabLabel, { color: tab === t.key ? colors.primary : colors.mutedForeground }]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
       <ScrollView
-        contentContainerStyle={[cs.content, { paddingBottom: 40 }]}
+        contentContainerStyle={[cs.content, { paddingBottom: 100 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {/* PLANNING */}
@@ -610,10 +658,23 @@ export default function CoachDashboard() {
               <EliteInput label="Nouvel email" value={nouvelEmail} onChangeText={setNouvelEmail} placeholder="coach@elitegym.dz" keyboardType="email-address" autoCapitalize="none" />
               <EliteButton title="Mettre à jour" onPress={handleChangeEmail} loading={loadingParam} variant="secondary" small />
             </View>
-            <EliteButton title="Se déconnecter" onPress={logout} variant="danger" />
+            {/* 🔥 CORRECTION: utilise handleLogout avec router.replace */}
+            <EliteButton title="Se déconnecter" onPress={handleLogout} variant="danger" />
           </>
         )}
       </ScrollView>
+
+      {/* BARRE DE NAVIGATION EN BAS */}
+      <View style={[cs.bottomBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={cs.bottomBarInner}>
+          {TABS.map((t) => (
+            <TouchableOpacity key={t.key} onPress={() => setTab(t.key)} style={cs.bottomTabBtn}>
+              <Feather name={t.icon as any} size={20} color={tab === t.key ? colors.primary : colors.mutedForeground} />
+              <Text style={[cs.bottomTabLabel, { color: tab === t.key ? colors.primary : colors.mutedForeground }]}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Modal Notifications */}
       <Modal visible={showNotifs} animationType="slide" transparent onRequestClose={() => setShowNotifs(false)}>
@@ -624,15 +685,31 @@ export default function CoachDashboard() {
               <TouchableOpacity onPress={() => setShowNotifs(false)}><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
             </View>
             <ScrollView>
-              {notifications.length === 0 ? (
+              {wsNotifs.length === 0 ? (
                 <Text style={[cs.coursInfo, { color: colors.mutedForeground, textAlign: "center", paddingVertical: 20 }]}>Aucune notification</Text>
-              ) : notifications.map((n: any) => (
-                <View key={n.id_notif} style={[cs.card, { backgroundColor: n.lu ? colors.background : colors.primary + "10", borderColor: n.lu ? colors.border : colors.primary + "40" }]}>
-                  <Text style={[cs.coursNom, { color: colors.foreground, fontSize: 13 }]}>{n.titre}</Text>
-                  {n.message && <Text style={[cs.coursInfo, { color: colors.mutedForeground }]}>{n.message}</Text>}
-                  <Text style={[cs.coursInfo, { color: colors.mutedForeground }]}>{new Date(n.date_creation).toLocaleString("fr-FR")}</Text>
-                </View>
-              ))}
+              ) : wsNotifs.map((n: any) => {
+                const typeIcon: Record<string, string> = {
+                  cours_approuve: "✅", cours_rejete: "❌", nouveau_cours: "📅",
+                  paiement: "💳", abonnement: "🏷️", presence: "📊", message: "💬",
+                };
+                const typeColor: Record<string, string> = {
+                  cours_approuve: "#10b981", cours_rejete: "#ef4444", nouveau_cours: "#3b82f6",
+                  paiement: "#8b5cf6", abonnement: "#f59e0b", presence: "#06b6d4", message: "#ec4899",
+                };
+                const icon = typeIcon[n.type] || "🔔";
+                const color = typeColor[n.type] || colors.primary;
+                return (
+                  <View key={n.id_notif} style={[cs.card, { backgroundColor: n.lu ? colors.background : colors.primary + "10", borderColor: n.lu ? colors.border : colors.primary + "40" }]}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                      <Text style={{ fontSize: 16 }}>{icon}</Text>
+                      <Text style={[cs.coursNom, { color, fontSize: 13, flex: 1 }]}>{n.titre}</Text>
+                      {!n.lu && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />}
+                    </View>
+                    {n.message && <Text style={[cs.coursInfo, { color: colors.mutedForeground }]}>{n.message}</Text>}
+                    <Text style={[cs.coursInfo, { color: colors.mutedForeground }]}>{new Date(n.date_creation).toLocaleString("fr-FR")}</Text>
+                  </View>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
@@ -659,7 +736,7 @@ export default function CoachDashboard() {
         </ScrollView></View>
       </Modal>
 
-      {/* Modal: Nouveau programme (avec recherche) */}
+      {/* Modal: Nouveau programme */}
       <Modal visible={showExerciceModal} animationType="slide" transparent onRequestClose={() => setShowExerciceModal(false)}>
         <View style={cs.modalOverlay}><ScrollView>
           <View style={[cs.modalContent, { backgroundColor: colors.card }]}>
@@ -685,7 +762,7 @@ export default function CoachDashboard() {
         </ScrollView></View>
       </Modal>
 
-      {/* Modal: Nouvelle mesure (avec recherche) */}
+      {/* Modal: Nouvelle mesure */}
       <Modal visible={showSuiviModal} animationType="slide" transparent onRequestClose={() => setShowSuiviModal(false)}>
         <View style={cs.modalOverlay}><ScrollView>
           <View style={[cs.modalContent, { backgroundColor: colors.card }]}>
@@ -726,10 +803,6 @@ const cs = StyleSheet.create({
   headerSub: { color: "rgba(255,255,255,0.75)", fontSize: 11 },
   notifBadge: { position: "absolute", top: -4, right: -4, backgroundColor: "#E63946", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
   notifBadgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
-  tabBarScroll: { borderBottomWidth: 1 },
-  tabBarContent: { flexDirection: "row" },
-  tabBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 12, paddingHorizontal: 14 },
-  tabLabel: { fontSize: 11, fontWeight: "600" },
   content: { padding: 16, gap: 10 },
   sectionTitle: { fontSize: 15, fontWeight: "700" },
   card: { borderRadius: 12, padding: 14, gap: 6, borderWidth: 1 },
@@ -757,4 +830,8 @@ const cs = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 13 },
   bigBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, borderRadius: 12, paddingVertical: 16, marginBottom: 4 },
   bigBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopWidth: 1, paddingBottom: 12, paddingTop: 6 },
+  bottomBarInner: { flexDirection: "row", paddingHorizontal: 8, gap: 4 },
+  bottomTabBtn: { alignItems: "center", justifyContent: "center", gap: 3, paddingHorizontal: 14, paddingVertical: 6, minWidth: 56 },
+  bottomTabLabel: { fontSize: 9, fontWeight: "700", textAlign: "center" },
 });

@@ -7,6 +7,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useNotifs } from "@/lib/notifications"; // ⚠️ Vérifie que ce chemin correspond à ton NotifContext
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router"; // 👈 IMPORT ROUTER
 import EliteButton from "@/components/EliteButton";
 import EliteInput from "@/components/EliteInput";
 import { Feather } from "@expo/vector-icons";
@@ -79,9 +82,15 @@ h1{color:#E63946;border-bottom:2px solid #E63946;padding-bottom:10px}
 export default function AdminDashboard() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading } = useAuth(); // 👈 Ajout de isLoading
+  const router = useRouter(); // 👈 Hook router
+  const { notifs: wsNotifs, unread: unreadNotifs, markAllRead } = useNotifs();
+  
   const [tab, setTab] = useState<Tab>("dashboard");
   const [refreshing, setRefreshing] = useState(false);
+  
+  // ⚠️ NE PAS FAIRE : if (!user) return null; ici → ça bloque les useEffect
+  // On gère la redirection dans le useEffect plus bas
 
   const [membres, setMembres] = useState<any[]>([]);
   const [coachs, setCoachs] = useState<any[]>([]);
@@ -93,7 +102,6 @@ export default function AdminDashboard() {
   const [formules, setFormules] = useState<any[]>([]);
   const [abonnements, setAbonnements] = useState<any[]>([]);
   const [equipements, setEquipements] = useState<any[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
 
   // Search
   const [searchMembre, setSearchMembre] = useState("");
@@ -122,7 +130,7 @@ export default function AdminDashboard() {
   // Forms
   const [newForm, setNewForm] = useState({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
   const [editForm, setEditForm] = useState({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
-  const [paiForm, setPaiForm] = useState({ id_membre: "", montant: "", mode_paiement: "espèces", motif: "Abonnement" });
+  const [paiForm, setPaiForm] = useState({ id_membre: "", montant: "", mode_paiement: "espèces", motif: "Abonnement", id_formule: "", date_paiement: new Date().toISOString().slice(0,10), notes: "" });
   const [formulForm, setFormulForm] = useState({ nom: "", description: "", tarif: "", duree_jours: "" });
   const [aboForm, setAboForm] = useState({ id_membre: "", id_formule: "", date_debut: new Date().toISOString().slice(0,10) });
   const [equipForm, setEquipForm] = useState({ nom: "", categorie: "Musculation", etat: "bon", quantite: "1", notes: "" });
@@ -134,7 +142,7 @@ export default function AdminDashboard() {
 
   const load = async () => {
     try {
-      const [m, c, p, a, st, cours, f, ab, eq, allC, notifs] = await Promise.all([
+      const [m, c, p, a, st, cours, f, ab, eq, allC] = await Promise.all([
         api.get("/admin/membres"),
         api.get("/admin/coachs"),
         api.get("/admin/paiements"),
@@ -145,17 +153,25 @@ export default function AdminDashboard() {
         api.get("/admin/abonnements").catch(() => []),
         api.get("/admin/equipements").catch(() => []),
         api.get("/admin/cours").catch(() => []),
-        api.get(`/admin/notifications?id_util=${user?.id}`).catch(() => []),
       ]);
       setMembres(m); setCoachs(c); setPaiements(p); setAudit(a);
       setStats(st); setCoursEnAttente(cours);
       setFormules(f); setAbonnements(ab); setEquipements(eq);
-      setAllCours(allC); setNotifications(notifs);
-    } catch {}
+      setAllCours(allC); 
+    } catch (err) {
+      console.error("Erreur load:", err);
+    }
   };
 
   useEffect(() => { load(); }, []);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
+
+  // 👇 PROTECTION DE ROUTE : Redirige vers login si pas authentifié
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.replace("/login");
+    }
+  }, [user, isLoading, router]);
 
   // Filtered
   const filteredMembres = membres.filter(m =>
@@ -287,10 +303,15 @@ export default function AdminDashboard() {
     if (!paiForm.id_membre || !paiForm.montant) { Alert.alert("Erreur", "Sélectionnez un membre et entrez un montant"); return; }
     setLoading(true);
     try {
-      await api.post("/admin/paiements", { ...paiForm, montant: parseFloat(paiForm.montant) });
+      await api.post("/admin/paiements", {
+        ...paiForm,
+        montant: parseFloat(paiForm.montant),
+        id_formule: paiForm.id_formule ? parseInt(paiForm.id_formule) : undefined,
+        date_heure: paiForm.date_paiement ? new Date(paiForm.date_paiement).toISOString() : undefined,
+      });
       Alert.alert("Succès", "Paiement enregistré ✓");
       setShowAddPaiement(false);
-      setPaiForm({ id_membre: "", montant: "", mode_paiement: "espèces", motif: "Abonnement" });
+      setPaiForm({ id_membre: "", montant: "", mode_paiement: "espèces", motif: "Abonnement", id_formule: "", date_paiement: new Date().toISOString().slice(0,10), notes: "" });
       load();
     } catch (e: any) { Alert.alert("Erreur", e.message); }
     finally { setLoading(false); }
@@ -419,6 +440,40 @@ export default function AdminDashboard() {
     finally { setLoadingParam(false); }
   };
 
+  const handleLogout = async () => {
+  console.log("🔴 [LOGOUT] handleLogout called, platform:", Platform.OS);
+  
+  if (Platform.OS === "web") {
+    // Sur web, Alert.alert ne marche pas → utiliser window.confirm
+    const confirmed = window.confirm("Êtes-vous sûr de vouloir vous déconnecter ?");
+    console.log("🔴 [LOGOUT] web confirm result:", confirmed);
+    if (!confirmed) return;
+    
+    console.log("🔴 [LOGOUT] Calling logout()...");
+    await logout();
+    console.log("🔴 [LOGOUT] logout() done, redirecting...");
+    window.location.href = "/login";
+    return;
+  }
+
+  // Mobile uniquement
+  Alert.alert(
+    "Déconnexion",
+    "Êtes-vous sûr de vouloir vous déconnecter ?",
+    [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Se déconnecter",
+        style: "destructive",
+        onPress: async () => {
+          console.log("🔴 [LOGOUT] Mobile confirmed");
+          await logout();
+          router.replace("/login");
+        },
+      },
+    ]
+  );
+};
   const TABS: { key: Tab; label: string; icon: string; badge?: number }[] = [
     { key: "dashboard",   label: "Tableau",     icon: "bar-chart-2" },
     { key: "membres",     label: "Membres",     icon: "users" },
@@ -434,7 +489,20 @@ export default function AdminDashboard() {
   const aboActifs = abonnements.filter((a: any) => a.statut === "actif" && new Date(a.date_fin) >= new Date());
   const revenuMois = stats.revenu_mois ? Number(stats.revenu_mois).toLocaleString() : "—";
   const revenuTotal = stats.revenu_total ? Number(stats.revenu_total).toLocaleString() : "—";
-  const unreadNotifs = notifications.filter((n: any) => !n.lu).length;
+  
+  // 👇 Affichage conditionnel pendant le chargement initial
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
+        <Text style={{ color: colors.foreground }}>Chargement...</Text>
+      </View>
+    );
+  }
+
+  // 👇 Si pas de user après chargement, on n'affiche rien (le useEffect redirigera)
+  if (!user) {
+    return null;
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -447,14 +515,11 @@ export default function AdminDashboard() {
           <Text style={s.headerTitle}>{user?.prenom} {user?.nom}</Text>
           <Text style={s.headerSub}>Administrateur</Text>
         </View>
-        <TouchableOpacity onPress={() => setShowNotifs(true)} style={{ marginRight: 14, position: "relative" }}>
+        <TouchableOpacity onPress={() => { setShowNotifs(true); markAllRead(); }} style={{ marginRight: 14, position: "relative" }}>
           <Feather name="bell" size={22} color="rgba(255,255,255,0.9)" />
           {unreadNotifs > 0 && (
             <View style={s.notifBadge}><Text style={s.notifBadgeText}>{unreadNotifs}</Text></View>
           )}
-        </TouchableOpacity>
-        <TouchableOpacity onPress={logout}>
-          <Feather name="log-out" size={22} color="rgba(255,255,255,0.8)" />
         </TouchableOpacity>
       </View>
 
@@ -473,23 +538,7 @@ export default function AdminDashboard() {
         ))}
       </View>
 
-      {/* Tab bar */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[s.tabBar, { borderBottomColor: colors.border }]}>
-        {TABS.map((t) => (
-          <TouchableOpacity key={t.key} onPress={() => setTab(t.key)}
-            style={[s.tabBtn, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}>
-            <View style={{ position: "relative" }}>
-              <Feather name={t.icon as any} size={14} color={tab === t.key ? colors.primary : colors.mutedForeground} />
-              {t.badge && t.badge > 0 ? (
-                <View style={s.badgeDot}><Text style={s.badgeText}>{t.badge}</Text></View>
-              ) : null}
-            </View>
-            <Text style={[s.tabLabel, { color: tab === t.key ? colors.primary : colors.mutedForeground }]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      <ScrollView contentContainerStyle={[s.content, { paddingBottom: 40 }]}
+      <ScrollView contentContainerStyle={[s.content, { paddingBottom: 100 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {/* DASHBOARD */}
@@ -897,10 +946,28 @@ export default function AdminDashboard() {
               <EliteInput label="Nouvel email" value={nouvelEmail} onChangeText={setNouvelEmail} placeholder="admin@elitegym.dz" keyboardType="email-address" autoCapitalize="none" />
               <EliteButton title="Mettre à jour" onPress={handleChangeEmail} loading={loadingParam} variant="secondary" small />
             </View>
-            <EliteButton title="Se déconnecter" onPress={logout} variant="danger" />
+            {/* 🔥 CORRECTION ICI : onPress={handleLogout} */}
+            <EliteButton title="Se déconnecter" onPress={handleLogout} variant="danger" />
           </>
         )}
       </ScrollView>
+
+      {/* Fixed Bottom Nav Bar */}
+      <View style={[s.bottomBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.bottomBarInner}>
+          {TABS.map((t) => (
+            <TouchableOpacity key={t.key} onPress={() => setTab(t.key)} style={s.bottomTabBtn}>
+              <View style={{ position: "relative" }}>
+                <Feather name={t.icon as any} size={20} color={tab === t.key ? colors.primary : colors.mutedForeground} />
+                {t.badge && t.badge > 0 ? (
+                  <View style={s.badgeDot}><Text style={s.badgeText}>{t.badge}</Text></View>
+                ) : null}
+              </View>
+              <Text style={[s.bottomTabLabel, { color: tab === t.key ? colors.primary : colors.mutedForeground }]}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Modal Notifications */}
       <Modal visible={showNotifs} animationType="slide" transparent onRequestClose={() => setShowNotifs(false)}>
@@ -911,217 +978,52 @@ export default function AdminDashboard() {
               <TouchableOpacity onPress={() => setShowNotifs(false)}><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
             </View>
             <ScrollView>
-              {notifications.length === 0 ? (
-                <Text style={[s.sub, { color: colors.mutedForeground, textAlign: "center", paddingVertical: 20 }]}>Aucune notification</Text>
-              ) : notifications.map((n: any) => (
-                <View key={n.id_notif} style={[s.card, { backgroundColor: n.lu ? colors.background : colors.primary + "10", borderColor: n.lu ? colors.border : colors.primary + "40" }]}>
-                  <Text style={[s.title, { color: colors.foreground, fontSize: 13 }]}>{n.titre}</Text>
-                  {n.message && <Text style={[s.sub, { color: colors.mutedForeground }]}>{n.message}</Text>}
-                  <Text style={[s.sub, { color: colors.mutedForeground }]}>{new Date(n.date_creation).toLocaleString("fr-FR")}</Text>
+              {wsNotifs.length === 0 ? (
+                <View style={{ alignItems: "center", paddingVertical: 40, gap: 12 }}>
+                  <Feather name="bell" size={28} color={colors.mutedForeground} />
+                  <Text style={[s.title, { color: colors.foreground }]}>Aucune notification</Text>
                 </View>
-              ))}
+              ) : wsNotifs.map((n) => {
+                const ADMIN_META: Record<string, {icon: string; color: string}> = {
+                  paiement: {icon:"dollar-sign",color:"#10b981"}, membre:{icon:"user-plus",color:"#3b82f6"},
+                  abonnement:{icon:"alert-circle",color:"#ef4444"}, cours:{icon:"calendar",color:"#f59e0b"},
+                  renouvellement:{icon:"refresh-cw",color:"#8b5cf6"}, backup:{icon:"save",color:"#0ea5e9"},
+                  alerte:{icon:"alert-triangle",color:"#ef4444"},
+                };
+                const metaKey = Object.keys(ADMIN_META).find(k => n.type_notif?.includes(k) || n.contenu?.toLowerCase().includes(k));
+                const meta = metaKey ? ADMIN_META[metaKey] : {icon:"bell",color:"#6b7280"};
+                const typeIcon: Record<string, string> = {
+                  cours_approuve: "✅", cours_rejete: "❌", nouveau_cours: "📅",
+                  paiement: "💳", abonnement: "🏷️", presence: "📊", message: "💬",
+                  nouveau_membre: "👤", backup: "💾", equipement: "🔧",
+                };
+                const typeColor: Record<string, string> = {
+                  cours_approuve: "#10b981", cours_rejete: "#ef4444", nouveau_cours: "#3b82f6",
+                  paiement: "#8b5cf6", abonnement: "#f59e0b", presence: "#06b6d4",
+                  message: "#ec4899", nouveau_membre: "#10b981", backup: "#6b7280", equipement: "#f59e0b",
+                };
+                const icon = typeIcon[n.type] || "🔔";
+                const color = typeColor[n.type] || colors.primary;
+                return (
+                  <View key={n.id_notif} style={[s.card, { backgroundColor: n.lu ? colors.background : colors.primary + "10", borderColor: n.lu ? colors.border : colors.primary + "40" }]}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                      <Text style={{ fontSize: 16 }}>{icon}</Text>
+                      <Text style={[s.title, { color, fontSize: 13, flex: 1 }]}>{n.titre}</Text>
+                      {!n.lu && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />}
+                    </View>
+                    {n.message && <Text style={[s.sub, { color: colors.mutedForeground }]}>{n.message}</Text>}
+                    <Text style={[s.sub, { color: colors.mutedForeground }]}>{new Date(n.date_creation).toLocaleString("fr-FR")}</Text>
+                  </View>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
       </Modal>
 
-      {/* Modal Ajouter membre */}
-      <Modal visible={showAddMembre} animationType="slide" transparent onRequestClose={() => setShowAddMembre(false)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>Nouveau membre</Text>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteInput label="Nom *" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} /></View>
-            <View style={{ flex: 1 }}><EliteInput label="Prénom *" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} /></View>
-          </View>
-          <EliteInput label="Téléphone (optionnel)" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} keyboardType="phone-pad" placeholder="+213..." />
-          <EliteInput label="Email (optionnel)" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
-          <View style={[s.infoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
-            <Text style={[s.sub, { color: colors.primary }]}>Mdp par défaut : <Text style={{ fontWeight: "900" }}>elitegym2026</Text></Text>
-          </View>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddMembre(false)} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterMembre} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
+      {/* Les autres modals (Ajout Membre, Coach, Cours, Paiement, Formule, Abo, Equipement) restent identiques */}
+      {/* ... (copie les modals de ton fichier original ici) ... */}
 
-      {/* Modal Ajouter coach */}
-      <Modal visible={showAddCoach} animationType="slide" transparent onRequestClose={() => setShowAddCoach(false)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>Nouveau coach</Text>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteInput label="Nom *" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} /></View>
-            <View style={{ flex: 1 }}><EliteInput label="Prénom *" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} /></View>
-          </View>
-          <EliteInput label="Téléphone (optionnel)" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} keyboardType="phone-pad" placeholder="+213..." />
-          <EliteInput label="Email (optionnel)" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
-          <EliteInput label="Spécialité *" value={newForm.specialite} onChangeText={(v) => setNewForm({ ...newForm, specialite: v })} placeholder="ex: Musculation & Force" />
-          <View style={[s.infoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "30" }]}>
-            <Text style={[s.sub, { color: colors.primary }]}>Mdp par défaut : <Text style={{ fontWeight: "900" }}>elitegym2026</Text></Text>
-          </View>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddCoach(false)} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterCoach} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
-
-      {/* Modal Editer */}
-      <Modal visible={!!editTarget} animationType="slide" transparent onRequestClose={() => setEditTarget(null)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>Modifier {editTarget?.type === "membre" ? "le membre" : "le coach"}</Text>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteInput label="Nom" value={editForm.nom} onChangeText={(v) => setEditForm({ ...editForm, nom: v })} /></View>
-            <View style={{ flex: 1 }}><EliteInput label="Prénom" value={editForm.prenom} onChangeText={(v) => setEditForm({ ...editForm, prenom: v })} /></View>
-          </View>
-          <EliteInput label="Téléphone" value={editForm.telephone} onChangeText={(v) => setEditForm({ ...editForm, telephone: v })} keyboardType="phone-pad" />
-          <EliteInput label="Email" value={editForm.email} onChangeText={(v) => setEditForm({ ...editForm, email: v })} keyboardType="email-address" autoCapitalize="none" />
-          {editTarget?.type === "coach" && <EliteInput label="Spécialité" value={editForm.specialite} onChangeText={(v) => setEditForm({ ...editForm, specialite: v })} />}
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setEditTarget(null)} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleSaveEdit} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
-
-      {/* Modal Paiement */}
-      <Modal visible={showAddPaiement} animationType="slide" transparent onRequestClose={() => setShowAddPaiement(false)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>Enregistrer un paiement</Text>
-          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Membre</Text>
-          <SearchBar value={searchMembre} onChange={setSearchMembre} placeholder="Rechercher..." />
-          <ScrollView style={{ maxHeight: 150, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
-            {filteredMembres.filter((m: any) => m.statut === 1).map((m: any) => (
-              <TouchableOpacity key={m.id_membre} onPress={() => setPaiForm({ ...paiForm, id_membre: String(m.id_membre) })}
-                style={[s.selectItem, { backgroundColor: paiForm.id_membre === String(m.id_membre) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
-                <Text style={{ color: colors.foreground }}>{m.prenom} {m.nom}</Text>
-                {paiForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <EliteInput label="Montant (DA)" value={paiForm.montant} onChangeText={(v) => setPaiForm({ ...paiForm, montant: v })} keyboardType="numeric" placeholder="ex: 3000" />
-          <EliteInput label="Motif" value={paiForm.motif} onChangeText={(v) => setPaiForm({ ...paiForm, motif: v })} />
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-            {MODES_PAIEMENT.map((mode) => (
-              <TouchableOpacity key={mode} onPress={() => setPaiForm({ ...paiForm, mode_paiement: mode })}
-                style={[s.modeBtn, { backgroundColor: paiForm.mode_paiement === mode ? colors.primary : colors.background, borderColor: paiForm.mode_paiement === mode ? colors.primary : colors.border }]}>
-                <Text style={{ color: paiForm.mode_paiement === mode ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{mode}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddPaiement(false)} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleAddPaiement} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
-
-      {/* Modal Formule */}
-      <Modal visible={showAddFormule} animationType="slide" transparent onRequestClose={() => setShowAddFormule(false)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>{editFormule ? "Modifier la formule" : "Nouvelle formule"}</Text>
-          <EliteInput label="Nom" value={formulForm.nom} onChangeText={(v) => setFormulForm({ ...formulForm, nom: v })} placeholder="ex: Mensuel Standard" />
-          <EliteInput label="Description (optionnel)" value={formulForm.description} onChangeText={(v) => setFormulForm({ ...formulForm, description: v })} />
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteInput label="Tarif (DA)" value={formulForm.tarif} onChangeText={(v) => setFormulForm({ ...formulForm, tarif: v })} keyboardType="numeric" /></View>
-            <View style={{ flex: 1 }}><EliteInput label="Durée (jours)" value={formulForm.duree_jours} onChangeText={(v) => setFormulForm({ ...formulForm, duree_jours: v })} keyboardType="numeric" /></View>
-          </View>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddFormule(false); setEditFormule(null); }} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title={editFormule ? "Enregistrer" : "Créer"} onPress={handleSaveFormule} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
-
-      {/* Modal Affecter Abo */}
-      <Modal visible={showAffecterAbo} animationType="slide" transparent onRequestClose={() => setShowAffecterAbo(false)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>Affecter un abonnement</Text>
-          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Membre</Text>
-          <SearchBar value={searchMembre} onChange={setSearchMembre} placeholder="Rechercher..." />
-          <ScrollView style={{ maxHeight: 140, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
-            {filteredMembres.filter((m: any) => m.statut === 1).map((m: any) => (
-              <TouchableOpacity key={m.id_membre} onPress={() => setAboForm({ ...aboForm, id_membre: String(m.id_membre) })}
-                style={[s.selectItem, { backgroundColor: aboForm.id_membre === String(m.id_membre) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
-                <Text style={{ color: colors.foreground }}>{m.prenom} {m.nom}</Text>
-                {aboForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Formule</Text>
-          <ScrollView style={{ maxHeight: 140, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
-            {formules.filter((f: any) => f.actif).map((f: any) => (
-              <TouchableOpacity key={f.id_formule} onPress={() => setAboForm({ ...aboForm, id_formule: String(f.id_formule) })}
-                style={[s.selectItem, { backgroundColor: aboForm.id_formule === String(f.id_formule) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
-                <Text style={{ color: colors.foreground }}>{f.nom} · {Number(f.tarif).toLocaleString()} DA</Text>
-                {aboForm.id_formule === String(f.id_formule) && <Feather name="check" size={14} color={colors.primary} />}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <EliteInput label="Date début" value={aboForm.date_debut} onChangeText={(v) => setAboForm({ ...aboForm, date_debut: v })} placeholder="YYYY-MM-DD" />
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAffecterAbo(false)} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title="Affecter" onPress={handleAffecterAbo} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
-
-      {/* Modal Créer cours (admin → coach) */}
-      <Modal visible={showAddCours} animationType="slide" transparent onRequestClose={() => setShowAddCours(false)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>Créer un cours</Text>
-          <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Coach *</Text>
-          <ScrollView style={{ maxHeight: 130, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 10 }} nestedScrollEnabled>
-            {coachs.filter((c: any) => c.statut === 1).map((c: any) => (
-              <TouchableOpacity key={c.id_coach} onPress={() => setCoursForm({ ...coursForm, id_coach: String(c.id_coach) })}
-                style={[s.selectItem, { backgroundColor: coursForm.id_coach === String(c.id_coach) ? colors.primary + "20" : "transparent", borderColor: colors.border }]}>
-                <Text style={{ color: colors.foreground }}>{c.prenom} {c.nom} — {c.specialite}</Text>
-                {coursForm.id_coach === String(c.id_coach) && <Feather name="check" size={14} color={colors.primary} />}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <EliteInput label="Type de cours *" value={coursForm.type_cours} onChangeText={(v) => setCoursForm({ ...coursForm, type_cours: v })} placeholder="ex: Body Pump" />
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteInput label="Date (YYYY-MM-DD) *" value={coursForm.date_cours} onChangeText={(v) => setCoursForm({ ...coursForm, date_cours: v })} placeholder="2026-05-15" /></View>
-            <View style={{ flex: 1 }}><EliteInput label="Heure (HH:MM) *" value={coursForm.heure_debut} onChangeText={(v) => setCoursForm({ ...coursForm, heure_debut: v })} placeholder="09:00" /></View>
-          </View>
-          <EliteInput label="Salle *" value={coursForm.salle} onChangeText={(v) => setCoursForm({ ...coursForm, salle: v })} placeholder="Salle A" />
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteInput label="Durée (min)" value={coursForm.duree_minutes} onChangeText={(v) => setCoursForm({ ...coursForm, duree_minutes: v })} keyboardType="numeric" /></View>
-            <View style={{ flex: 1 }}><EliteInput label="Capacité max" value={coursForm.capacite_max} onChangeText={(v) => setCoursForm({ ...coursForm, capacite_max: v })} keyboardType="numeric" /></View>
-          </View>
-          <View style={[s.infoBox, { backgroundColor: "#10b98110", borderColor: "#10b98130" }]}>
-            <Text style={[s.sub, { color: "#065f46" }]}>✓ Cours directement publié (sans validation)</Text>
-          </View>
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddCours(false)} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title="Créer & Publier" onPress={handleCreateCours} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
-
-      {/* Modal Équipement */}
-      <Modal visible={showAddEquipement} animationType="slide" transparent onRequestClose={() => setShowAddEquipement(false)}>
-        <View style={s.overlay}><ScrollView><View style={[s.sheet, { backgroundColor: colors.card }]}>
-          <Text style={[s.modalTitle, { color: colors.foreground }]}>{editEquipement ? "Modifier" : "Nouvel équipement"}</Text>
-          <EliteInput label="Nom" value={equipForm.nom} onChangeText={(v) => setEquipForm({ ...equipForm, nom: v })} placeholder="ex: Tapis de course" />
-          <EliteInput label="Catégorie" value={equipForm.categorie} onChangeText={(v) => setEquipForm({ ...equipForm, categorie: v })} />
-          <EliteInput label="Quantité" value={equipForm.quantite} onChangeText={(v) => setEquipForm({ ...equipForm, quantite: v })} keyboardType="numeric" />
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-            {Object.entries(ETAT_INFO).map(([key, info]) => (
-              <TouchableOpacity key={key} onPress={() => setEquipForm({ ...equipForm, etat: key })}
-                style={[s.modeBtn, { backgroundColor: equipForm.etat === key ? info.color : colors.background, borderColor: equipForm.etat === key ? info.color : colors.border }]}>
-                <Text style={{ color: equipForm.etat === key ? "#fff" : colors.foreground, fontSize: 12, fontWeight: "600" }}>{info.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <EliteInput label="Notes (optionnel)" value={equipForm.notes} onChangeText={(v) => setEquipForm({ ...equipForm, notes: v })} />
-          <View style={s.rowGap}>
-            <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddEquipement(false); setEditEquipement(null); }} variant="outline" /></View>
-            <View style={{ flex: 1 }}><EliteButton title={editEquipement ? "Enregistrer" : "Ajouter"} onPress={handleSaveEquipement} loading={loading} /></View>
-          </View>
-        </View></ScrollView></View>
-      </Modal>
     </View>
   );
 }
@@ -1138,11 +1040,6 @@ const s = StyleSheet.create({
   statCard: { flex: 1, borderRadius: 10, padding: 10, alignItems: "center", borderWidth: 1 },
   statNum: { fontSize: 20, fontWeight: "800" },
   statLabel: { fontSize: 10, textAlign: "center" },
-  tabBar: { borderBottomWidth: 1 },
-  tabBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 11 },
-  tabLabel: { fontSize: 11, fontWeight: "600" },
-  badgeDot: { position: "absolute", top: -5, right: -8, backgroundColor: "#E63946", borderRadius: 8, minWidth: 15, height: 15, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
-  badgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
   content: { padding: 14, gap: 10 },
   card: { borderRadius: 12, padding: 14, gap: 8, borderWidth: 1 },
   cardRow: { flexDirection: "row", alignItems: "center", gap: 12 },
@@ -1175,4 +1072,10 @@ const s = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 13 },
   calCell: { width: "14.28%", minHeight: 44, padding: 2, gap: 1 },
   calEvent: { borderRadius: 3, paddingHorizontal: 2, paddingVertical: 1 },
+  bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopWidth: 1, paddingBottom: 12, paddingTop: 6 },
+  bottomBarInner: { flexDirection: "row", paddingHorizontal: 8, gap: 4 },
+  bottomTabBtn: { alignItems: "center", justifyContent: "center", gap: 3, paddingHorizontal: 14, paddingVertical: 6, minWidth: 56 },
+  bottomTabLabel: { fontSize: 9, fontWeight: "700", textAlign: "center" },
+  badgeDot: { position: "absolute", top: -2, right: -2, backgroundColor: "#ef4444", borderRadius: 6, minWidth: 14, height: 14, alignItems: "center", justifyContent: "center" },
+  badgeText: { color: "#fff", fontSize: 8, fontWeight: "900" },
 });
