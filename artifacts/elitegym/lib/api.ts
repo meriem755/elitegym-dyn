@@ -1,10 +1,23 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_URL } from "./config";
 
+let _cachedToken: string | null = null;
+
+export function setApiToken(token: string | null) {
+  _cachedToken = token;
+}
+
 async function getToken(): Promise<string | null> {
-  const val = await AsyncStorage.getItem("elitegym_user");
-  if (!val) return null;
-  return JSON.parse(val).token;
+  if (_cachedToken) return _cachedToken;
+  try {
+    const val = await AsyncStorage.getItem("elitegym_user");
+    if (!val) return null;
+    const parsed = JSON.parse(val);
+    _cachedToken = parsed.token || null;
+    return _cachedToken;
+  } catch {
+    return null;
+  }
 }
 
 async function request(path: string, options: RequestInit = {}) {
@@ -14,7 +27,6 @@ async function request(path: string, options: RequestInit = {}) {
     ...(options.headers as Record<string, string> || {}),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur réseau");
