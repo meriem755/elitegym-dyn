@@ -9,6 +9,11 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://elitegym-dyn-production.up.railway.app/api"
+      },
+      "config": {
+        "packager": {
+          "installCommand": "pnpm install --no-frozen-lockfile"
+        }
       }
     }
   }
