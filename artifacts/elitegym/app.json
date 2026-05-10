@@ -16,12 +16,19 @@
     "ios": {
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.meriemb.elitegym"
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
-      ["expo-router", { "origin": "https://replit.com/" }],
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
       "expo-font",
       "expo-web-browser"
     ],
@@ -31,6 +38,17 @@
     },
     "css": {
       "engine": "default"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9d65de05-252c-4557-b83d-c26c24e8f2b5"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/9d65de05-252c-4557-b83d-c26c24e8f2b5"
     }
   }
 }
