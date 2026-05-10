@@ -1021,8 +1021,207 @@ export default function AdminDashboard() {
         </View>
       </Modal>
 
-      {/* Les autres modals (Ajout Membre, Coach, Cours, Paiement, Formule, Abo, Equipement) restent identiques */}
-      {/* ... (copie les modals de ton fichier original ici) ... */}
+      {/* Modal: Ajouter un membre */}
+      <Modal visible={showAddMembre} animationType="slide" transparent onRequestClose={() => setShowAddMembre(false)}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>Ajouter un membre</Text>
+            <EliteInput label="Prénom *" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} placeholder="Prénom" />
+            <EliteInput label="Nom *" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} placeholder="Nom" />
+            <EliteInput label="Téléphone" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} placeholder="+213..." keyboardType="phone-pad" />
+            <EliteInput label="Email" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} placeholder="email@..." keyboardType="email-address" autoCapitalize="none" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddMembre(false)} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterMembre} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
+
+      {/* Modal: Ajouter un coach */}
+      <Modal visible={showAddCoach} animationType="slide" transparent onRequestClose={() => setShowAddCoach(false)}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>Ajouter un coach</Text>
+            <EliteInput label="Prénom *" value={newForm.prenom} onChangeText={(v) => setNewForm({ ...newForm, prenom: v })} placeholder="Prénom" />
+            <EliteInput label="Nom *" value={newForm.nom} onChangeText={(v) => setNewForm({ ...newForm, nom: v })} placeholder="Nom" />
+            <EliteInput label="Spécialité *" value={newForm.specialite} onChangeText={(v) => setNewForm({ ...newForm, specialite: v })} placeholder="ex: Musculation, Yoga..." />
+            <EliteInput label="Téléphone" value={newForm.telephone} onChangeText={(v) => setNewForm({ ...newForm, telephone: v })} placeholder="+213..." keyboardType="phone-pad" />
+            <EliteInput label="Email" value={newForm.email} onChangeText={(v) => setNewForm({ ...newForm, email: v })} placeholder="email@..." keyboardType="email-address" autoCapitalize="none" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddCoach(false)} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title="Ajouter" onPress={handleAjouterCoach} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
+
+      {/* Modal: Modifier membre/coach */}
+      <Modal visible={!!editTarget} animationType="slide" transparent onRequestClose={() => setEditTarget(null)}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>
+              Modifier {editTarget?.type === "membre" ? "le membre" : "le coach"}
+            </Text>
+            <EliteInput label="Prénom" value={editForm.prenom} onChangeText={(v) => setEditForm({ ...editForm, prenom: v })} placeholder="Prénom" />
+            <EliteInput label="Nom" value={editForm.nom} onChangeText={(v) => setEditForm({ ...editForm, nom: v })} placeholder="Nom" />
+            {editTarget?.type === "coach" && (
+              <EliteInput label="Spécialité" value={editForm.specialite} onChangeText={(v) => setEditForm({ ...editForm, specialite: v })} placeholder="Spécialité" />
+            )}
+            <EliteInput label="Téléphone" value={editForm.telephone} onChangeText={(v) => setEditForm({ ...editForm, telephone: v })} placeholder="+213..." keyboardType="phone-pad" />
+            <EliteInput label="Email" value={editForm.email} onChangeText={(v) => setEditForm({ ...editForm, email: v })} placeholder="email@..." keyboardType="email-address" autoCapitalize="none" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setEditTarget(null)} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleSaveEdit} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
+
+      {/* Modal: Créer un cours */}
+      <Modal visible={showAddCours} animationType="slide" transparent onRequestClose={() => setShowAddCours(false)}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>Créer un cours</Text>
+            <Text style={[s.sub, { color: colors.mutedForeground }]}>Coach *</Text>
+            <ScrollView style={{ maxHeight: 120, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 8 }} nestedScrollEnabled>
+              {coachs.filter(c => c.statut === 1).map((c: any) => (
+                <TouchableOpacity key={c.id_coach} onPress={() => setCoursForm({ ...coursForm, id_coach: String(c.id_coach) })}
+                  style={[{ flexDirection: "row", justifyContent: "space-between", padding: 10, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: coursForm.id_coach === String(c.id_coach) ? colors.primary + "15" : "transparent" }]}>
+                  <Text style={{ color: coursForm.id_coach === String(c.id_coach) ? colors.primary : colors.foreground, fontWeight: "600" }}>{c.prenom} {c.nom} — {c.specialite}</Text>
+                  {coursForm.id_coach === String(c.id_coach) && <Feather name="check" size={14} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <EliteInput label="Type de cours *" value={coursForm.type_cours} onChangeText={(v) => setCoursForm({ ...coursForm, type_cours: v })} placeholder="ex: Body Pump" />
+            <EliteInput label="Date (YYYY-MM-DD) *" value={coursForm.date_cours} onChangeText={(v) => setCoursForm({ ...coursForm, date_cours: v })} placeholder="2026-05-15" />
+            <EliteInput label="Heure (HH:MM) *" value={coursForm.heure_debut} onChangeText={(v) => setCoursForm({ ...coursForm, heure_debut: v })} placeholder="09:00" />
+            <EliteInput label="Salle *" value={coursForm.salle} onChangeText={(v) => setCoursForm({ ...coursForm, salle: v })} placeholder="Salle A" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteInput label="Durée (min)" value={coursForm.duree_minutes} onChangeText={(v) => setCoursForm({ ...coursForm, duree_minutes: v })} keyboardType="numeric" /></View>
+              <View style={{ flex: 1 }}><EliteInput label="Capacité" value={coursForm.capacite_max} onChangeText={(v) => setCoursForm({ ...coursForm, capacite_max: v })} keyboardType="numeric" /></View>
+            </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddCours(false)} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title="Créer" onPress={handleCreateCours} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
+
+      {/* Modal: Enregistrer un paiement */}
+      <Modal visible={showAddPaiement} animationType="slide" transparent onRequestClose={() => setShowAddPaiement(false)}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>Enregistrer un paiement</Text>
+            <Text style={[s.sub, { color: colors.mutedForeground }]}>Membre *</Text>
+            <ScrollView style={{ maxHeight: 120, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 8 }} nestedScrollEnabled>
+              {membres.filter(m => m.statut === 1).map((m: any) => (
+                <TouchableOpacity key={m.id_membre} onPress={() => setPaiForm({ ...paiForm, id_membre: String(m.id_membre) })}
+                  style={[{ flexDirection: "row", justifyContent: "space-between", padding: 10, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: paiForm.id_membre === String(m.id_membre) ? colors.primary + "15" : "transparent" }]}>
+                  <Text style={{ color: paiForm.id_membre === String(m.id_membre) ? colors.primary : colors.foreground, fontWeight: "600" }}>{m.prenom} {m.nom}</Text>
+                  {paiForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <EliteInput label="Montant (DA) *" value={paiForm.montant} onChangeText={(v) => setPaiForm({ ...paiForm, montant: v })} placeholder="2500" keyboardType="numeric" />
+            <EliteInput label="Motif" value={paiForm.motif} onChangeText={(v) => setPaiForm({ ...paiForm, motif: v })} placeholder="Abonnement" />
+            <EliteInput label="Date (YYYY-MM-DD)" value={paiForm.date_paiement} onChangeText={(v) => setPaiForm({ ...paiForm, date_paiement: v })} placeholder="2026-05-10" />
+            <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>Mode de paiement</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {MODES_PAIEMENT.map((mode) => (
+                  <TouchableOpacity key={mode} onPress={() => setPaiForm({ ...paiForm, mode_paiement: mode })}
+                    style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: paiForm.mode_paiement === mode ? colors.primary : colors.border, backgroundColor: paiForm.mode_paiement === mode ? colors.primary + "15" : "transparent" }}>
+                    <Text style={{ color: paiForm.mode_paiement === mode ? colors.primary : colors.foreground, fontWeight: "600", fontSize: 13 }}>{mode}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAddPaiement(false)} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title="Enregistrer" onPress={handleAddPaiement} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
+
+      {/* Modal: Formule abonnement */}
+      <Modal visible={showAddFormule} animationType="slide" transparent onRequestClose={() => { setShowAddFormule(false); setEditFormule(null); }}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>{editFormule ? "Modifier la formule" : "Nouvelle formule"}</Text>
+            <EliteInput label="Nom *" value={formulForm.nom} onChangeText={(v) => setFormulForm({ ...formulForm, nom: v })} placeholder="ex: Mensuel" />
+            <EliteInput label="Description" value={formulForm.description} onChangeText={(v) => setFormulForm({ ...formulForm, description: v })} placeholder="Description..." multiline />
+            <EliteInput label="Tarif (DA) *" value={formulForm.tarif} onChangeText={(v) => setFormulForm({ ...formulForm, tarif: v })} placeholder="2500" keyboardType="numeric" />
+            <EliteInput label="Durée (jours) *" value={formulForm.duree_jours} onChangeText={(v) => setFormulForm({ ...formulForm, duree_jours: v })} placeholder="30" keyboardType="numeric" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddFormule(false); setEditFormule(null); }} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title={editFormule ? "Modifier" : "Créer"} onPress={handleSaveFormule} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
+
+      {/* Modal: Affecter abonnement */}
+      <Modal visible={showAffecterAbo} animationType="slide" transparent onRequestClose={() => setShowAffecterAbo(false)}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>Affecter un abonnement</Text>
+            <Text style={[s.sub, { color: colors.mutedForeground }]}>Membre *</Text>
+            <ScrollView style={{ maxHeight: 120, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 8 }} nestedScrollEnabled>
+              {membres.filter(m => m.statut === 1).map((m: any) => (
+                <TouchableOpacity key={m.id_membre} onPress={() => setAboForm({ ...aboForm, id_membre: String(m.id_membre) })}
+                  style={[{ flexDirection: "row", justifyContent: "space-between", padding: 10, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: aboForm.id_membre === String(m.id_membre) ? colors.primary + "15" : "transparent" }]}>
+                  <Text style={{ color: aboForm.id_membre === String(m.id_membre) ? colors.primary : colors.foreground, fontWeight: "600" }}>{m.prenom} {m.nom}</Text>
+                  {aboForm.id_membre === String(m.id_membre) && <Feather name="check" size={14} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Text style={[s.sub, { color: colors.mutedForeground }]}>Formule *</Text>
+            <ScrollView style={{ maxHeight: 120, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 8 }} nestedScrollEnabled>
+              {formules.filter(f => f.actif).map((f: any) => (
+                <TouchableOpacity key={f.id_formule} onPress={() => setAboForm({ ...aboForm, id_formule: String(f.id_formule) })}
+                  style={[{ flexDirection: "row", justifyContent: "space-between", padding: 10, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: aboForm.id_formule === String(f.id_formule) ? colors.primary + "15" : "transparent" }]}>
+                  <Text style={{ color: aboForm.id_formule === String(f.id_formule) ? colors.primary : colors.foreground, fontWeight: "600" }}>{f.nom} — {Number(f.tarif).toLocaleString()} DA</Text>
+                  {aboForm.id_formule === String(f.id_formule) && <Feather name="check" size={14} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <EliteInput label="Date début" value={aboForm.date_debut} onChangeText={(v) => setAboForm({ ...aboForm, date_debut: v })} placeholder="2026-05-10" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => setShowAffecterAbo(false)} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title="Affecter" onPress={handleAffecterAbo} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
+
+      {/* Modal: Équipement */}
+      <Modal visible={showAddEquipement} animationType="slide" transparent onRequestClose={() => { setShowAddEquipement(false); setEditEquipement(null); }}>
+        <View style={s.overlay}><ScrollView>
+          <View style={[s.sheet, { backgroundColor: colors.card }]}>
+            <Text style={[s.modalTitle, { color: colors.foreground }]}>{editEquipement ? "Modifier l'équipement" : "Ajouter un équipement"}</Text>
+            <EliteInput label="Nom *" value={equipForm.nom} onChangeText={(v) => setEquipForm({ ...equipForm, nom: v })} placeholder="ex: Tapis de course" />
+            <EliteInput label="Catégorie" value={equipForm.categorie} onChangeText={(v) => setEquipForm({ ...equipForm, categorie: v })} placeholder="Musculation, Cardio..." />
+            <Text style={[s.sub, { color: colors.mutedForeground, marginBottom: 4 }]}>État</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+              {Object.entries(ETAT_INFO).map(([key, val]) => (
+                <TouchableOpacity key={key} onPress={() => setEquipForm({ ...equipForm, etat: key })}
+                  style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: equipForm.etat === key ? val.color : colors.border, backgroundColor: equipForm.etat === key ? val.color + "20" : "transparent" }}>
+                  <Text style={{ color: equipForm.etat === key ? val.color : colors.mutedForeground, fontSize: 12, fontWeight: "700" }}>{val.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <EliteInput label="Quantité" value={equipForm.quantite} onChangeText={(v) => setEquipForm({ ...equipForm, quantite: v })} placeholder="1" keyboardType="numeric" />
+            <EliteInput label="Notes" value={equipForm.notes} onChangeText={(v) => setEquipForm({ ...equipForm, notes: v })} placeholder="Notes optionnelles..." multiline />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}><EliteButton title="Annuler" onPress={() => { setShowAddEquipement(false); setEditEquipement(null); }} variant="outline" /></View>
+              <View style={{ flex: 1 }}><EliteButton title={editEquipement ? "Modifier" : "Ajouter"} onPress={handleSaveEquipement} loading={loading} /></View>
+            </View>
+          </View>
+        </ScrollView></View>
+      </Modal>
 
     </View>
   );
