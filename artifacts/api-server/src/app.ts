@@ -6,6 +6,18 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// ✅ CORS EN PREMIER — avant tout autre middleware
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: false,
+}));
+
+// ✅ Répondre explicitement aux preflight OPTIONS
+app.options("*", cors());
+
+// Logger après CORS
 app.use(
   pinoHttp({
     logger,
@@ -18,21 +30,11 @@ app.use(
         };
       },
       res(res) {
-        return {
-          statusCode: res.statusCode,
-        };
+        return { statusCode: res.statusCode };
       },
     },
   }),
 );
-
-// ✅ CORS corrigé — autorise Authorization header, compatible Express 5
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: false,
-}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
