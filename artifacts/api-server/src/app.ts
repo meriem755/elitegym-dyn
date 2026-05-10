@@ -6,7 +6,7 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
-// ✅ CORS EN PREMIER — avant tout autre middleware
+// ✅ CORS EN PREMIER
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -14,8 +14,8 @@ app.use(cors({
   credentials: false,
 }));
 
-// ✅ Répondre explicitement aux preflight OPTIONS
-app.options("*", cors());
+// ✅ Express 5 : syntaxe correcte pour les preflight OPTIONS
+app.options("/{*path}", cors());
 
 // Logger après CORS
 app.use(
@@ -23,11 +23,7 @@ app.use(
     logger,
     serializers: {
       req(req) {
-        return {
-          id: req.id,
-          method: req.method,
-          url: req.url?.split("?")[0],
-        };
+        return { id: req.id, method: req.method, url: req.url?.split("?")[0] };
       },
       res(res) {
         return { statusCode: res.statusCode };
