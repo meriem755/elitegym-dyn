@@ -8,12 +8,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://elitegym-dyn-production.up.railway.app/api"
-      },
-      "config": {
-        "packager": {
-          "installCommand": "pnpm install --no-frozen-lockfile"
-        }
+        "EXPO_PUBLIC_API_URL": "https://elitegym-dyn-production.up.railway.app/api",
+        "RAILPACK_INSTALL_CMD": "pnpm install --no-frozen-lockfile"
       }
     }
   }
