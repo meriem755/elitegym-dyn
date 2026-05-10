@@ -27,46 +27,30 @@ export default function ProfilScreen() {
 
   // 🔥 Fonction de déconnexion ULTRA-ROBUSTE
   const handleLogout = async () => {
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm("Êtes-vous sûr de vouloir vous déconnecter ?");
-      if (!confirmed) return;
-      
-      try {
-        await AsyncStorage.removeItem("elitegym_user");
-        await AsyncStorage.removeItem("token");
-        await AsyncStorage.removeItem("elitegym_token");
-        window.location.href = "/login";
-      } catch (e) {
-        console.error("Erreur logout:", e);
-        window.location.href = "/login";
-      }
-      return;
-    }
-    
-    Alert.alert(
-      "Déconnexion", 
-      "Êtes-vous sûr de vouloir vous déconnecter ?", 
-      [
-        { text: "Annuler", style: "cancel" },
-        { 
-          text: "Se déconnecter", 
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AsyncStorage.multiRemove(["elitegym_user", "token", "elitegym_token"]);
-              router.dismissAll?.();
-              setTimeout(() => {
-                router.replace("/login");
-              }, 100);
-            } catch (e) {
-              console.error("Erreur logout:", e);
-              router.replace("/login");
-            }
-          }
+  if (Platform.OS === "web") {
+    const confirmed = window.confirm("Êtes-vous sûr de vouloir vous déconnecter ?");
+    if (!confirmed) return;
+    await logout(); // ✅ utilise logout() du AuthContext
+    window.location.href = "/login";
+    return;
+  }
+
+  Alert.alert(
+    "Déconnexion",
+    "Êtes-vous sûr de vouloir vous déconnecter ?",
+    [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Se déconnecter",
+        style: "destructive",
+        onPress: async () => {
+          await logout(); // ✅ utilise logout() du AuthContext
+          router.replace("/login");
         },
-      ]
-    );
-  };
+      },
+    ]
+  );
+};
 
   const handleChangeMdp = async () => {
     if (!ancienMdp || !nouveauMdp) { 
