@@ -140,6 +140,47 @@ export default function AdminDashboard() {
   const [nouvelEmail, setNouvelEmail] = useState("");
   const [loadingParam, setLoadingParam] = useState(false);
 
+
+  // 🔧 Helper pour afficher les alertes de façon fiable sur Android/APK
+const safeAlert = (title: string, message: string, onDismiss?: () => void) => {
+  // Petit délai pour éviter les conflits avec la fermeture des modals
+  setTimeout(() => {
+    Alert.alert(title, message, [
+      { 
+        text: "OK", 
+        onPress: () => {
+          onDismiss?.();
+        } 
+      }
+    ]);
+  }, 100);
+};
+
+const safeConfirm = (
+  title: string, 
+  message: string, 
+  onConfirm: () => Promise<void> | void,
+  options?: { confirmText?: string; cancelText?: string; destructive?: boolean }
+) => {
+  const { confirmText = "Confirmer", cancelText = "Annuler", destructive = false } = options || {};
+  
+  setTimeout(() => {
+    Alert.alert(title, message, [
+      { text: cancelText, style: "cancel" },
+      { 
+        text: confirmText, 
+        style: destructive ? "destructive" : "default", 
+        onPress: () => {
+          Promise.resolve(onConfirm()).catch((err) => {
+            console.error("❌ Erreur confirmation:", err);
+            safeAlert("Erreur", err.message || "Une erreur est survenue");
+          });
+        } 
+      },
+    ]);
+  }, 100);
+};
+
   const load = async () => {
     try {
       const [m, c, p, a, st, cours, f, ab, eq, allC] = await Promise.all([
@@ -199,247 +240,398 @@ export default function AdminDashboard() {
   const coursForDay = (day: number) => coursMonth.filter(c => new Date(c.date_cours).getDate() === day);
 
   // Handlers membres
-  const handleAjouterMembre = async () => {
-    if (!newForm.nom || !newForm.prenom) { Alert.alert("Erreur", "Nom et prénom requis"); return; }
-    if (!newForm.telephone && !newForm.email) { Alert.alert("Erreur", "Téléphone ou email requis"); return; }
-    setLoading(true);
-    try {
-      await api.post("/admin/membres", { nom: newForm.nom, prenom: newForm.prenom, telephone: newForm.telephone || undefined, email: newForm.email || undefined });
-      Alert.alert("Succès", "Membre ajouté\nMot de passe par défaut : elitegym2026");
+  // ✅ handleAjouterMembre - CORRIGÉ
+const handleAjouterMembre = async () => {
+  console.log("🔵 [DEBUG] handleAjouterMembre called");
+  
+  if (!newForm.nom || !newForm.prenom) { 
+    safeAlert("Erreur", "Nom et prénom requis"); 
+    return; 
+  }
+  if (!newForm.telephone && !newForm.email) { 
+    safeAlert("Erreur", "Téléphone ou email requis"); 
+    return; 
+  }
+  
+  setLoading(true);
+  try {
+    console.log("🔵 [DEBUG] Appel API POST /admin/membres");
+    await api.post("/admin/membres", { 
+      nom: newForm.nom, 
+      prenom: newForm.prenom, 
+      telephone: newForm.telephone || undefined, 
+      email: newForm.email || undefined 
+    });
+    
+    console.log("🔵 [DEBUG] API succès, affichage alerte");
+    safeAlert("Succès", "Membre ajouté\nMot de passe par défaut : elitegym2026", () => {
+      console.log("🔵 [DEBUG] Alert dismissée, fermeture modal + reset");
       setShowAddMembre(false);
       setNewForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
       load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
+    });
+  } catch (e: any) { 
+    console.error("❌ [ERREUR] handleAjouterMembre:", e);
+    safeAlert("Erreur", e.message || "Erreur inconnue"); 
+  } finally { 
+    setLoading(false);
+    console.log("🔵 [DEBUG] setLoading(false)");
+  }
+};
 
-  const handleAjouterCoach = async () => {
-    if (!newForm.nom || !newForm.prenom || !newForm.specialite) { Alert.alert("Erreur", "Nom, prénom et spécialité requis"); return; }
-    if (!newForm.telephone && !newForm.email) { Alert.alert("Erreur", "Téléphone ou email requis"); return; }
-    setLoading(true);
-    try {
-      await api.post("/admin/coachs", { nom: newForm.nom, prenom: newForm.prenom, telephone: newForm.telephone || undefined, email: newForm.email || undefined, specialite: newForm.specialite });
-      Alert.alert("Succès", "Coach ajouté\nMot de passe : elitegym2026");
+// ✅ handleAjouterCoach - MÊME STRUCTURE
+const handleAjouterCoach = async () => {
+  if (!newForm.nom || !newForm.prenom || !newForm.specialite) { 
+    safeAlert("Erreur", "Nom, prénom et spécialité requis"); 
+    return; 
+  }
+  if (!newForm.telephone && !newForm.email) { 
+    safeAlert("Erreur", "Téléphone ou email requis"); 
+    return; 
+  }
+  setLoading(true);
+  try {
+    await api.post("/admin/coachs", { 
+      nom: newForm.nom, 
+      prenom: newForm.prenom, 
+      telephone: newForm.telephone || undefined, 
+      email: newForm.email || undefined, 
+      specialite: newForm.specialite 
+    });
+    safeAlert("Succès", "Coach ajouté\nMot de passe : elitegym2026", () => {
       setShowAddCoach(false);
       setNewForm({ nom: "", prenom: "", telephone: "", email: "", specialite: "" });
       load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleAjouterCoach:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoading(false); 
+  }
+};
 
-  const openEditMembre = (m: any) => {
-    setEditTarget({ type: "membre", data: m });
-    setEditForm({ nom: m.nom, prenom: m.prenom, telephone: m.telephone || "", email: m.email || "", specialite: "" });
-  };
-  const openEditCoach = (c: any) => {
-    setEditTarget({ type: "coach", data: c });
-    setEditForm({ nom: c.nom, prenom: c.prenom, telephone: c.telephone || "", email: c.email || "", specialite: c.specialite || "" });
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editTarget) return;
-    setLoading(true);
-    try {
-      if (editTarget.type === "membre") await api.put(`/admin/membres/${editTarget.data.id_membre}`, editForm);
-      else await api.put(`/admin/coachs/${editTarget.data.id_coach}`, editForm);
-      Alert.alert("Succès", "Modifié ✓");
-      setEditTarget(null); load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
-
-  const handleSuspendre = (type: "membre"|"coach", item: any) => {
-    const actif = item.statut === 1;
-    const action = actif ? "Suspendre" : "Réactiver";
-    Alert.alert(`${action}`, `${action} ${item.prenom} ${item.nom} ?`, [
-      { text: "Annuler", style: "cancel" },
-      { text: action, style: actif ? "destructive" : "default", onPress: async () => {
-        try {
-          if (actif) {
-            if (type === "membre") await api.delete(`/admin/membres/${item.id_membre}`);
-            else await api.delete(`/admin/coachs/${item.id_coach}`);
-          } else {
-            if (type === "membre") await api.put(`/admin/membres/${item.id_membre}/activer`, {});
-            else await api.put(`/admin/coachs/${item.id_coach}/activer`, {});
-          }
-          load();
-        } catch (e: any) { Alert.alert("Erreur", e.message); }
-      }},
-    ]);
-  };
-
-  // Planning
-  const handleCreateCours = async () => {
-    if (!coursForm.id_coach || !coursForm.type_cours || !coursForm.date_cours || !coursForm.heure_debut || !coursForm.salle) {
-      Alert.alert("Erreur", "Remplissez tous les champs obligatoires"); return;
+// ✅ handleSaveEdit - CORRIGÉ
+const handleSaveEdit = async () => {
+  if (!editTarget) return;
+  setLoading(true);
+  try {
+    if (editTarget.type === "membre") {
+      await api.put(`/admin/membres/${editTarget.data.id_membre}`, editForm);
+    } else {
+      await api.put(`/admin/coachs/${editTarget.data.id_coach}`, editForm);
     }
-    setLoading(true);
-    try {
-      await api.post("/admin/cours", { ...coursForm, id_coach: parseInt(coursForm.id_coach), duree_minutes: parseInt(coursForm.duree_minutes)||60, capacite_max: parseInt(coursForm.capacite_max)||20 });
-      Alert.alert("Succès", "Cours créé et publié ✓");
+    safeAlert("Succès", "Modifié ✓", () => {
+      setEditTarget(null); 
+      load();
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleSaveEdit:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoading(false); 
+  }
+};
+
+// ✅ handleSuspendre - Utilise safeConfirm
+const handleSuspendre = (type: "membre"|"coach", item: any) => {
+  const actif = item.statut === 1;
+  const action = actif ? "Suspendre" : "Réactiver";
+  
+  safeConfirm(
+    `${action}`, 
+    `${action} ${item.prenom} ${item.nom} ?`, 
+    async () => {
+      try {
+        if (actif) {
+          if (type === "membre") await api.delete(`/admin/membres/${item.id_membre}`);
+          else await api.delete(`/admin/coachs/${item.id_coach}`);
+        } else {
+          if (type === "membre") await api.put(`/admin/membres/${item.id_membre}/activer`, {});
+          else await api.put(`/admin/coachs/${item.id_coach}/activer`, {});
+        }
+        load();
+      } catch (e: any) { 
+        console.error("❌ Erreur handleSuspendre:", e);
+        safeAlert("Erreur", e.message); 
+      }
+    },
+    { confirmText: action, destructive: actif }
+  );
+};
+
+// ✅ handleCreateCours - CORRIGÉ
+const handleCreateCours = async () => {
+  if (!coursForm.id_coach || !coursForm.type_cours || !coursForm.date_cours || !coursForm.heure_debut || !coursForm.salle) {
+    safeAlert("Erreur", "Remplissez tous les champs obligatoires"); 
+    return;
+  }
+  setLoading(true);
+  try {
+    await api.post("/admin/cours", { 
+      ...coursForm, 
+      id_coach: parseInt(coursForm.id_coach), 
+      duree_minutes: parseInt(coursForm.duree_minutes)||60, 
+      capacite_max: parseInt(coursForm.capacite_max)||20 
+    });
+    safeAlert("Succès", "Cours créé et publié ✓", () => {
       setShowAddCours(false);
       setCoursForm({ id_coach: "", type_cours: "", date_cours: "", heure_debut: "", duree_minutes: "60", salle: "", capacite_max: "20" });
       load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleCreateCours:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoading(false); 
+  }
+};
 
-  const handleApprouver = async (id: number) => {
-    try { await api.put(`/admin/cours/${id}/approuver`); Alert.alert("Approuvé ✓"); load(); }
-    catch (e: any) { Alert.alert("Erreur", e.message); }
-  };
-  const handleRejeter = async (id: number) => {
-    Alert.alert("Rejeter ?", "Confirmer ?", [
-      { text: "Annuler", style: "cancel" },
-      { text: "Rejeter", style: "destructive", onPress: async () => {
-        try { await api.put(`/admin/cours/${id}/rejeter`); load(); }
-        catch (e: any) { Alert.alert("Erreur", e.message); }
-      }},
-    ]);
-  };
+// ✅ handleApprouver - Simple
+const handleApprouver = async (id: number) => {
+  try { 
+    await api.put(`/admin/cours/${id}/approuver`); 
+    safeAlert("Succès", "Approuvé ✓", load); 
+  } catch (e: any) { 
+    console.error("❌ Erreur handleApprouver:", e);
+    safeAlert("Erreur", e.message); 
+  }
+};
 
-  // Paiements
-  const handleAddPaiement = async () => {
-    if (!paiForm.id_membre || !paiForm.montant) { Alert.alert("Erreur", "Sélectionnez un membre et entrez un montant"); return; }
-    setLoading(true);
-    try {
-      await api.post("/admin/paiements", {
-        ...paiForm,
-        montant: parseFloat(paiForm.montant),
-        id_formule: paiForm.id_formule ? parseInt(paiForm.id_formule) : undefined,
-        date_heure: paiForm.date_paiement ? new Date(paiForm.date_paiement).toISOString() : undefined,
-      });
-      Alert.alert("Succès", "Paiement enregistré ✓");
+// ✅ handleRejeter - Confirmation
+const handleRejeter = async (id: number) => {
+  safeConfirm("Rejeter ?", "Confirmer le rejet de ce cours ?", async () => {
+    try { 
+      await api.put(`/admin/cours/${id}/rejeter`); 
+      load(); 
+    } catch (e: any) { 
+      console.error("❌ Erreur handleRejeter:", e);
+      safeAlert("Erreur", e.message); 
+    }
+  });
+};
+
+// ✅ handleAddPaiement - CORRIGÉ
+const handleAddPaiement = async () => {
+  if (!paiForm.id_membre || !paiForm.montant) { 
+    safeAlert("Erreur", "Sélectionnez un membre et entrez un montant"); 
+    return; 
+  }
+  setLoading(true);
+  try {
+    await api.post("/admin/paiements", {
+      ...paiForm,
+      montant: parseFloat(paiForm.montant),
+      id_formule: paiForm.id_formule ? parseInt(paiForm.id_formule) : undefined,
+      date_heure: paiForm.date_paiement ? new Date(paiForm.date_paiement).toISOString() : undefined,
+    });
+    safeAlert("Succès", "Paiement enregistré ✓", () => {
       setShowAddPaiement(false);
       setPaiForm({ id_membre: "", montant: "", mode_paiement: "espèces", motif: "Abonnement", id_formule: "", date_paiement: new Date().toISOString().slice(0,10), notes: "" });
       load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
-
-  const handleExportPdf = (p: any) => {
-    if (Platform.OS === "web") {
-      const html = generatePdfHtml(p);
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleAddPaiement:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoading(false); 
+  }
+};
+const handleExportPdf = (p: any) => {
+  if (Platform.OS === "web") {
+    const html = generatePdfHtml(p);
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  } else {
+    // Sur mobile, on affiche l'alerte avec safeAlert
+    safeAlert("Reçu PDF", `Reçu #${p.id_paiement} — ${Number(p.montant).toLocaleString()} DA\nDisponible sur la version web.`);
+  }
+};
+// ✅ handleSaveFormule - CORRIGÉ
+const handleSaveFormule = async () => {
+  if (!formulForm.nom || !formulForm.tarif || !formulForm.duree_jours) { 
+    safeAlert("Erreur", "Remplissez tous les champs"); 
+    return; 
+  }
+  setLoading(true);
+  try {
+    const body = { ...formulForm, tarif: parseFloat(formulForm.tarif), duree_jours: parseInt(formulForm.duree_jours) };
+    if (editFormule) {
+      await api.put(`/admin/formules/${editFormule.id_formule}`, { ...editFormule, ...body });
     } else {
-      Alert.alert("Reçu PDF", `Reçu #${p.id_paiement} — ${Number(p.montant).toLocaleString()} DA\nDisponible sur la version web.`);
+      await api.post("/admin/formules", body);
     }
-  };
-
-  // Formules
-  const handleSaveFormule = async () => {
-    if (!formulForm.nom || !formulForm.tarif || !formulForm.duree_jours) { Alert.alert("Erreur", "Remplissez tous les champs"); return; }
-    setLoading(true);
-    try {
-      const body = { ...formulForm, tarif: parseFloat(formulForm.tarif), duree_jours: parseInt(formulForm.duree_jours) };
-      if (editFormule) await api.put(`/admin/formules/${editFormule.id_formule}`, { ...editFormule, ...body });
-      else await api.post("/admin/formules", body);
-      Alert.alert("Succès", editFormule ? "Formule modifiée ✓" : "Formule créée ✓");
-      setShowAddFormule(false); setEditFormule(null);
+    safeAlert("Succès", editFormule ? "Formule modifiée ✓" : "Formule créée ✓", () => {
+      setShowAddFormule(false); 
+      setEditFormule(null);
       setFormulForm({ nom: "", description: "", tarif: "", duree_jours: "" });
       load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleSaveFormule:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoading(false); 
+  }
+};
 
-  const handleToggleFormule = (f: any) => {
-    const action = f.actif ? "Désactiver" : "Activer";
-    Alert.alert(action, `${action} "${f.nom}" ?`, [
-      { text: "Annuler", style: "cancel" },
-      { text: action, onPress: async () => {
-        try { await api.put(`/admin/formules/${f.id_formule}/toggle`, {}); load(); }
-        catch (e: any) { Alert.alert("Erreur", e.message); }
-      }},
-    ]);
-  };
+// ✅ handleToggleFormule - Confirmation
+const handleToggleFormule = (f: any) => {
+  const action = f.actif ? "Désactiver" : "Activer";
+  safeConfirm(action, `${action} "${f.nom}" ?`, async () => {
+    try { 
+      await api.put(`/admin/formules/${f.id_formule}/toggle`, {}); 
+      load(); 
+    } catch (e: any) { 
+      console.error("❌ Erreur handleToggleFormule:", e);
+      safeAlert("Erreur", e.message); 
+    }
+  });
+};
 
-  // Abonnements
-  const handleAffecterAbo = async () => {
-    if (!aboForm.id_membre || !aboForm.id_formule) { Alert.alert("Erreur", "Sélectionnez un membre et une formule"); return; }
-    setLoading(true);
-    try {
-      await api.post("/admin/abonnements", { ...aboForm, id_membre: parseInt(aboForm.id_membre), id_formule: parseInt(aboForm.id_formule) });
-      Alert.alert("Succès", "Abonnement affecté ✓");
+// ✅ handleAffecterAbo - CORRIGÉ
+const handleAffecterAbo = async () => {
+  if (!aboForm.id_membre || !aboForm.id_formule) { 
+    safeAlert("Erreur", "Sélectionnez un membre et une formule"); 
+    return; 
+  }
+  setLoading(true);
+  try {
+    await api.post("/admin/abonnements", { 
+      ...aboForm, 
+      id_membre: parseInt(aboForm.id_membre), 
+      id_formule: parseInt(aboForm.id_formule) 
+    });
+    safeAlert("Succès", "Abonnement affecté ✓", () => {
       setShowAffecterAbo(false);
       setAboForm({ id_membre: "", id_formule: "", date_debut: new Date().toISOString().slice(0,10) });
       load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleAffecterAbo:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoading(false); 
+  }
+};
 
-  const handleResilierAbo = (a: any) => {
-    Alert.alert("Résilier", `Résilier l'abonnement de ${a.prenom} ${a.nom} ?`, [
-      { text: "Annuler", style: "cancel" },
-      { text: "Résilier", style: "destructive", onPress: async () => {
-        try { await api.put(`/admin/abonnements/${a.id_abonnement}/resilier`, {}); load(); }
-        catch (e: any) { Alert.alert("Erreur", e.message); }
-      }},
-    ]);
-  };
+// ✅ handleResilierAbo - Confirmation
+const handleResilierAbo = (a: any) => {
+  safeConfirm("Résilier", `Résilier l'abonnement de ${a.prenom} ${a.nom} ?`, async () => {
+    try { 
+      await api.put(`/admin/abonnements/${a.id_abonnement}/resilier`, {}); 
+      load(); 
+    } catch (e: any) { 
+      console.error("❌ Erreur handleResilierAbo:", e);
+      safeAlert("Erreur", e.message); 
+    }
+  });
+};
 
-  // Équipements
-  const handleSaveEquipement = async () => {
-    if (!equipForm.nom) { Alert.alert("Erreur", "Entrez un nom"); return; }
-    setLoading(true);
-    try {
-      const body = { ...equipForm, quantite: parseInt(equipForm.quantite) || 1 };
-      if (editEquipement) await api.put(`/admin/equipements/${editEquipement.id_equipement}`, body);
-      else await api.post("/admin/equipements", body);
-      Alert.alert("Succès", editEquipement ? "Modifié ✓" : "Ajouté ✓");
-      setShowAddEquipement(false); setEditEquipement(null);
+// ✅ handleSaveEquipement - CORRIGÉ
+const handleSaveEquipement = async () => {
+  if (!equipForm.nom) { 
+    safeAlert("Erreur", "Entrez un nom"); 
+    return; 
+  }
+  setLoading(true);
+  try {
+    const body = { ...equipForm, quantite: parseInt(equipForm.quantite) || 1 };
+    if (editEquipement) {
+      await api.put(`/admin/equipements/${editEquipement.id_equipement}`, body);
+    } else {
+      await api.post("/admin/equipements", body);
+    }
+    safeAlert("Succès", editEquipement ? "Modifié ✓" : "Ajouté ✓", () => {
+      setShowAddEquipement(false); 
+      setEditEquipement(null);
       setEquipForm({ nom: "", categorie: "Musculation", etat: "bon", quantite: "1", notes: "" });
       load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoading(false); }
-  };
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleSaveEquipement:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoading(false); 
+  }
+};
 
-  const handleDeleteEquipement = (eq: any) => {
-    Alert.alert("Supprimer", `Supprimer "${eq.nom}" ?`, [
-      { text: "Annuler", style: "cancel" },
-      { text: "Supprimer", style: "destructive", onPress: async () => {
-        try { await api.delete(`/admin/equipements/${eq.id_equipement}`); load(); }
-        catch (e: any) { Alert.alert("Erreur", e.message); }
-      }},
-    ]);
-  };
+// ✅ handleDeleteEquipement - Confirmation
+const handleDeleteEquipement = (eq: any) => {
+  safeConfirm("Supprimer", `Supprimer "${eq.nom}" ?`, async () => {
+    try { 
+      await api.delete(`/admin/equipements/${eq.id_equipement}`); 
+      load(); 
+    } catch (e: any) { 
+      console.error("❌ Erreur handleDeleteEquipement:", e);
+      safeAlert("Erreur", e.message); 
+    }
+  });
+};
 
-  const handleBackup = async () => {
-    setBackupLoading(true);
-    try {
-      const r = await api.post("/admin/backup", { id_util: user?.id });
-      Alert.alert("Sauvegarde ✓", `${new Date(r.timestamp).toLocaleString("fr-FR")}\n${r.stats.membres} membres · ${r.stats.paiements} paiements`);
-      load();
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setBackupLoading(false); }
-  };
+// ✅ handleBackup - Simple
+const handleBackup = async () => {
+  setBackupLoading(true);
+  try {
+    const r = await api.post("/admin/backup", { id_util: user?.id });
+    safeAlert("Sauvegarde ✓", `${new Date(r.timestamp).toLocaleString("fr-FR")}\n${r.stats.membres} membres · ${r.stats.paiements} paiements`, load);
+  } catch (e: any) { 
+    console.error("❌ Erreur handleBackup:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setBackupLoading(false); 
+  }
+};
 
-  const handleChangeMdp = async () => {
-    if (!ancienMdp || !nouveauMdp || nouveauMdp.length < 6) { Alert.alert("Erreur", "Vérifiez les champs (min 6 car.)"); return; }
-    setLoadingParam(true);
-    try {
-      await api.post("/auth/change-password", { id_util: user?.id, ancien_mdp: ancienMdp, nouveau_mdp: nouveauMdp });
-      Alert.alert("Succès", "Mot de passe modifié ✓");
-      setAncienMdp(""); setNouveauMdp("");
-    } catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoadingParam(false); }
-  };
-  const handleChangeTel = async () => {
-    if (!nouveauTel) return;
-    setLoadingParam(true);
-    try { await api.post("/auth/change-phone", { id_util: user?.id, telephone: nouveauTel }); Alert.alert("Succès", "Numéro modifié ✓"); setNouveauTel(""); }
-    catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoadingParam(false); }
-  };
-  const handleChangeEmail = async () => {
-    if (!nouvelEmail) return;
-    setLoadingParam(true);
-    try { await api.post("/auth/change-email", { id_util: user?.id, email: nouvelEmail }); Alert.alert("Succès", "Email modifié ✓"); setNouvelEmail(""); }
-    catch (e: any) { Alert.alert("Erreur", e.message); }
-    finally { setLoadingParam(false); }
-  };
+// ✅ handleChangeMdp/Tel/Email - Simples
+const handleChangeMdp = async () => {
+  if (!ancienMdp || !nouveauMdp || nouveauMdp.length < 6) { 
+    safeAlert("Erreur", "Vérifiez les champs (min 6 car.)"); 
+    return; 
+  }
+  setLoadingParam(true);
+  try {
+    await api.post("/auth/change-password", { id_util: user?.id, ancien_mdp: ancienMdp, nouveau_mdp: nouveauMdp });
+    safeAlert("Succès", "Mot de passe modifié ✓", () => {
+      setAncienMdp(""); 
+      setNouveauMdp("");
+    });
+  } catch (e: any) { 
+    console.error("❌ Erreur handleChangeMdp:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoadingParam(false); 
+  }
+};
 
+const handleChangeTel = async () => {
+  if (!nouveauTel) return;
+  setLoadingParam(true);
+  try { 
+    await api.post("/auth/change-phone", { id_util: user?.id, telephone: nouveauTel }); 
+    safeAlert("Succès", "Numéro modifié ✓", () => setNouveauTel("")); 
+  } catch (e: any) { 
+    console.error("❌ Erreur handleChangeTel:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoadingParam(false); 
+  }
+};
+
+const handleChangeEmail = async () => {
+  if (!nouvelEmail) return;
+  setLoadingParam(true);
+  try { 
+    await api.post("/auth/change-email", { id_util: user?.id, email: nouvelEmail }); 
+    safeAlert("Succès", "Email modifié ✓", () => setNouvelEmail("")); 
+  } catch (e: any) { 
+    console.error("❌ Erreur handleChangeEmail:", e);
+    safeAlert("Erreur", e.message); 
+  } finally { 
+    setLoadingParam(false); 
+  }
+};
   const handleLogout = async () => {
   console.log("🔴 [LOGOUT] handleLogout called, platform:", Platform.OS);
   
