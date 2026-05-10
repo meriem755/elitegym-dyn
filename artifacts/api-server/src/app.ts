@@ -26,19 +26,12 @@ app.use(
   }),
 );
 
-// ✅ CORS corrigé — autorise Authorization header depuis n'importe quelle origine
+// ✅ CORS corrigé — autorise Authorization header, compatible Express 5
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: false,
-}));
-
-// ✅ Répondre aux preflight OPTIONS
-app.options("*", cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
 app.use(express.json());
