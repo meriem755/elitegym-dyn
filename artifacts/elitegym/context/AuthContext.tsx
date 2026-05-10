@@ -1,6 +1,6 @@
-// src/context/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { setApiToken } from "@/lib/api";
 
 interface User {
   id: number;
@@ -34,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const val = await AsyncStorage.getItem("elitegym_user");
         if (val) {
           const parsed = JSON.parse(val);
+          setApiToken(parsed.token || null); // ✅ restaure le token en mémoire
           setUser(parsed);
         }
       } catch (e) {
@@ -52,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       id_membre: data.id_membre, id_coach: data.id_coach,
     };
     await AsyncStorage.setItem("elitegym_user", JSON.stringify(userData));
+    setApiToken(userData.token); // ✅ met en cache immédiatement
     setUser(userData);
   };
 
@@ -63,15 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = useCallback(async () => {
-    console.log("🔐 Logout triggered");
     try {
       await AsyncStorage.multiRemove(["elitegym_user", "token", "elitegym_token"]);
-      console.log("🗑️ Storage cleared");
     } catch (e) {
       console.error("❌ Logout storage error:", e);
     } finally {
+      setApiToken(null); // ✅ efface le cache immédiatement
       setUser(null);
-      console.log("✅ User state set to null");
     }
   }, []);
 
