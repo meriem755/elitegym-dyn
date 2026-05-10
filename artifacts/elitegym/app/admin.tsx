@@ -207,6 +207,28 @@ const safeConfirm = (
   useEffect(() => { load(); }, []);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
+  const openEditMembre = (m: any) => {
+  setEditForm({
+    nom: m.nom || "",
+    prenom: m.prenom || "",
+    telephone: m.telephone || "",
+    email: m.email || "",
+    specialite: "",
+  });
+  setEditTarget({ type: "membre", data: m });
+};
+
+const openEditCoach = (c: any) => {
+  setEditForm({
+    nom: c.nom || "",
+    prenom: c.prenom || "",
+    telephone: c.telephone || "",
+    email: c.email || "",
+    specialite: c.specialite || "",
+  });
+  setEditTarget({ type: "coach", data: c });
+};
+
   // 👇 PROTECTION DE ROUTE : Redirige vers login si pas authentifié
   useEffect(() => {
     if (!isLoading && !user) {
