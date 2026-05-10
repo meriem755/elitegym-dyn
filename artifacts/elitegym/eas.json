@@ -1,21 +1,15 @@
 {
   "cli": {
-    "version": ">= 18.11.0",
-    "appVersionSource": "remote"
+    "version": ">= 3.0.0"
   },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
     "preview": {
-      "distribution": "internal"
-    },
-    "production": {
-      "autoIncrement": true
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://elitegym-dyn-production.up.railway.app/api"
+      }
     }
-  },
-  "submit": {
-    "production": {}
   }
 }
