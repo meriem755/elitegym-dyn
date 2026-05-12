@@ -15,7 +15,7 @@ Il suffit de créer **un seul fichier** dans `artifacts/elitegym/.env` :
 EXPO_PUBLIC_API_URL=http://192.168.1.42:8080/api
 ```
 
-- En local Replit, le projet utilise une valeur par défaut.
+
 - Sur le téléphone d’un ami, il suffit de mettre l’IP de son PC une seule fois dans ce fichier.
 - Le code mobile lit cette variable automatiquement pour l’API et le WebSocket.
 
@@ -159,6 +159,10 @@ pnpm --filter @workspace/elitegym run dev
 ```
 
 ---
+
+### compte admin :
+numero de telephone:0550000001
+mdp:Admin@2026
 
 ## Comment ça fonctionne
 
